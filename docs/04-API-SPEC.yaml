@@ -1,0 +1,370 @@
+openapi: 3.1.0
+info:
+  title: SISKA API
+  version: 1.0.0-draft
+  description: >-
+    Contract baseline for SISKA. Identity is supplied by Firebase ID token verified
+    server-side. Never trust userId/role from request bodies. Error bodies avoid sensitive details.
+servers:
+  - url: https://{host}/api/v1
+    variables:
+      host:
+        default: siska.example.edu
+security:
+  - FirebaseBearer: []
+tags:
+  - name: Reports
+  - name: Evidence
+  - name: Chat
+  - name: KnowledgeBase
+  - name: AI
+  - name: Profile
+paths:
+  /reports:
+    get:
+      tags: [Reports]
+      summary: List reports visible to caller
+      parameters:
+        - in: query
+          name: cursor
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+        - in: query
+          name: status
+          schema: { $ref: '#/components/schemas/ReportStatus' }
+      responses:
+        '200':
+          description: Paginated reports; reporters receive only their own reports
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Reports]
+      summary: Create report
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, description]
+              properties:
+                category: { type: string, minLength: 1, maxLength: 100 }
+                incidentAt: { type: [string, 'null'], format: date-time }
+                location: { type: [string, 'null'], maxLength: 500 }
+                description: { type: string, minLength: 1, maxLength: 20000 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /reports/{reportId}:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    get:
+      tags: [Reports]
+      summary: Get report detail
+      responses:
+        '200':
+          description: Report detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    patch:
+      tags: [Reports]
+      summary: Update report status (admin only)
+      description: Enforce allowed status transitions and append status history atomically.
+      x-required-role: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/ReportStatus' }
+                note: { type: string, maxLength: 2000 }
+      responses:
+        '200': { description: Status updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /reports/{reportId}/evidence:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      tags: [Evidence]
+      summary: Upload evidence through authorized server or signed upload flow
+      description: Private bucket only; enforce 5 MiB maximum and allowlisted file types; validate content server-side.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileName, contentType, sizeBytes]
+              properties:
+                fileName: { type: string, maxLength: 255 }
+                contentType: { type: string, enum: [application/pdf, image/jpeg, image/png] }
+                sizeBytes: { type: integer, minimum: 1, maximum: 5242880 }
+      responses:
+        '201': { description: Upload instructions or evidence metadata }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { description: File too large }
+  /reports/{reportId}/evidence/{evidenceId}/download:
+    get:
+      tags: [Evidence]
+      summary: Authorize download and issue short-lived signed URL
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+        - in: path
+          name: evidenceId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Short-lived URL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, expiresInSeconds]
+                properties:
+                  url: { type: string, format: uri }
+                  expiresInSeconds: { type: integer, maximum: 300 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /conversations:
+    get:
+      tags: [Chat]
+      summary: List caller's conversations or admin-assigned conversations
+      responses:
+        '200': { description: Conversation list }
+    post:
+      tags: [Chat]
+      summary: Create or open authorized conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reportId: { type: string }
+      responses:
+        '201': { description: Conversation created or returned }
+  /conversations/{conversationId}/messages:
+    parameters:
+      - in: path
+        name: conversationId
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Chat]
+      summary: List messages for conversation participant
+      responses:
+        '200': { description: Paginated messages }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Chat]
+      summary: Send message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 10000 }
+      responses:
+        '201': { description: Message created }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /ai/chat:
+    post:
+      tags: [AI]
+      summary: Ask SISKA AI general informational question
+      description: Do not pass report content or evidence. Apply rate limits, prompt-injection controls, retrieval gating and abstention.
+      security:
+        - FirebaseBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string, minLength: 1, maxLength: 4000 }
+                conversationId: { type: string }
+      responses:
+        '200':
+          description: Answer and source citations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [answer, grounded, sources]
+                properties:
+                  answer: { type: string }
+                  grounded: { type: boolean }
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        documentId: { type: string }
+                        title: { type: string }
+                        page: { type: integer }
+                  escalationMessage: { type: [string, 'null'] }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /admin/knowledge-documents:
+    get:
+      tags: [KnowledgeBase]
+      summary: List knowledge documents (admin only)
+      x-required-role: admin
+      responses:
+        '200': { description: Document list and indexing status }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [KnowledgeBase]
+      summary: Upload PDF for indexing (admin only)
+      x-required-role: admin
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                title: { type: string, maxLength: 250 }
+      responses:
+        '202': { description: Accepted for asynchronous processing }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { description: File too large }
+  /admin/knowledge-documents/{documentId}:
+    parameters:
+      - in: path
+        name: documentId
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [KnowledgeBase]
+      summary: Delete document and its chunks/index entries (admin only)
+      x-required-role: admin
+      responses:
+        '204': { description: Deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /admin/knowledge-documents/reindex:
+    post:
+      tags: [KnowledgeBase]
+      summary: Reindex selected/all approved documents (admin only)
+      x-required-role: admin
+      responses:
+        '202': { description: Reindex job queued }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /profile:
+    get:
+      tags: [Profile]
+      summary: Get current user's profile
+      responses:
+        '200': { description: Current profile }
+    patch:
+      tags: [Profile]
+      summary: Update allowed profile fields
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName: { type: string, maxLength: 120 }
+      responses:
+        '200': { description: Profile updated }
+components:
+  securitySchemes:
+    FirebaseBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: Firebase ID Token
+  parameters:
+    ReportId:
+      in: path
+      name: reportId
+      required: true
+      schema: { type: string }
+  schemas:
+    ReportStatus:
+      type: string
+      enum: [submitted, under_review, in_progress, resolved, rejected]
+    Report:
+      type: object
+      required: [id, category, description, status, createdAt]
+      properties:
+        id: { type: string }
+        category: { type: string }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/ReportStatus' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ReportDetail:
+      allOf:
+        - $ref: '#/components/schemas/Report'
+        - type: object
+          properties:
+            evidence: { type: array, items: { type: object } }
+            statusHistory: { type: array, items: { type: object } }
+    ReportPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Report' } }
+        nextCursor: { type: [string, 'null'] }
+    Error:
+      type: object
+      required: [code, message, requestId]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        requestId: { type: string }
+  responses:
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing or invalid identity token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Caller is not authorized
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found or not visible to caller
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

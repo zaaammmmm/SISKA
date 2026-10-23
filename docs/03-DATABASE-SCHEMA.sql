@@ -1,0 +1,25 @@
+-- SISKA uses Firebase Cloud Firestore, NOT PostgreSQL/Supabase.
+-- Firestore is a document database and does not consume SQL schema files.
+-- This requested filename is retained for deliverable naming compatibility only.
+-- DO NOT execute this file against a database.
+--
+-- Canonical logical schema: docs/02-ERD.md
+-- Firestore security rules: firebase/firestore.rules
+-- Cloud Storage security rules: firebase/storage.rules
+-- Index definitions: firebase/firestore.indexes.json
+-- Firebase CLI/Emulator configuration example: firebase/firebase.json.example
+--
+-- Collection outline:
+-- users/{uid}
+-- reports/{reportId}
+-- reports/{reportId}/evidence/{evidenceId}
+-- reports/{reportId}/statusHistory/{eventId}
+-- conversations/{conversationId}
+-- conversations/{conversationId}/messages/{messageId}
+-- knowledgeDocuments/{documentId}
+-- knowledgeChunks/{chunkId} (or a separately secured vector store)
+-- auditEvents/{eventId}
+--
+-- No Supabase client, PostgreSQL instance, SQL migration, or RLS is part of
+-- SISKA's target architecture. Firebase Security Rules and server-side
+-- authorization checks are the applicable controls.
