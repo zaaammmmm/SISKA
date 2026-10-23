@@ -1,13 +1,140 @@
 rules_version = '2';
 service cloud.firestore {
- match /databases/{database}/documents {
-  function signedIn(){ return request.auth != null; }
-  function isAdmin(){ return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'; }
-  match /users/{uid} { allow read: if signedIn() && (request.auth.uid == uid || isAdmin()); allow create: if signedIn() && request.auth.uid == uid && request.resource.data.role == 'reporter'; allow update: if signedIn() && request.auth.uid == uid && request.resource.data.role == resource.data.role; allow delete: if false; }
-  match /reports/{reportId} { allow create: if signedIn() && request.resource.data.reporterId == request.auth.uid; allow read: if signedIn() && (resource.data.reporterId == request.auth.uid || isAdmin()); allow update: if isAdmin(); allow delete: if false; }
-  match /conversations/{conversationId} { allow read: if signedIn() && (request.auth.uid in resource.data.participantIds || isAdmin()); allow create: if signedIn() && request.auth.uid in request.resource.data.participantIds; allow update: if signedIn() && (request.auth.uid in resource.data.participantIds || isAdmin()); allow delete: if false; match /messages/{messageId} { allow read, create: if signedIn(); allow update, delete: if false; } }
-  match /notifications/{id} { allow read: if signedIn() && resource.data.userId == request.auth.uid; allow write: if false; }
-  match /knowledgeDocuments/{id} { allow read: if isAdmin(); allow write: if isAdmin(); }
-  match /{document=**} { allow read, write: if false; }
- }
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Otoritas utama role adalah Custom User Claim (`request.auth.token.role`) sesuai README.md & 05-BACKEND-ARCHITECTURE.md §5
+    function isAdmin() {
+      return signedIn() && request.auth.token.role == 'admin';
+    }
+
+    function isReporter() {
+      return signedIn() && (
+        request.auth.token.role == 'reporter' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'reporter')
+      );
+    }
+
+    function isReportOwner(reportId) {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/reports/$(reportId)) &&
+        get(/databases/$(database)/documents/reports/$(reportId)).data.reporterId == request.auth.uid;
+    }
+
+    function isConversationParticipant(convData) {
+      return signedIn() && (
+        convData.get('reporterId', '') == request.auth.uid ||
+        convData.get('reporterUid', '') == request.auth.uid ||
+        (isAdmin() && (
+          convData.get('assignedAdminId', null) == request.auth.uid ||
+          convData.get('adminUid', null) == request.auth.uid ||
+          (convData.get('assignedAdminId', null) == null && convData.get('adminUid', null) == null)
+        ))
+      );
+    }
+
+    // 1. users/{uid} (docs/02-ERD.md §4 & AUTH-01 / AUTH-04)
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.role == 'reporter'
+        && request.resource.data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'createdAt', 'updatedAt']);
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'createdAt', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // 2. reports/{reportId} (docs/02-ERD.md §4 & REP-01..REP-06)
+    match /reports/{reportId} {
+      allow create: if isReporter()
+        && request.resource.data.reporterId == request.auth.uid
+        && request.resource.data.status == 'submitted'
+        && request.resource.data.category is string
+        && request.resource.data.category.size() >= 1
+        && request.resource.data.category.size() <= 100
+        && request.resource.data.description is string
+        && request.resource.data.description.size() >= 1
+        && request.resource.data.description.size() <= 20000
+        && request.resource.data.keys().hasOnly([
+          'reporterId', 'category', 'incidentAt', 'location',
+          'description', 'status', 'createdAt', 'updatedAt', 'resolvedAt'
+        ]);
+      allow read: if signedIn() && (resource.data.reporterId == request.auth.uid || isAdmin());
+      // Perubahan status sensitif wajib melalui backend Admin SDK (transaksi status + statusHistory + auditEvents)
+      allow update, delete: if false;
+
+      // 2a. Sub-koleksi evidence (FILE-01..FILE-03)
+      match /evidence/{evidenceId} {
+        allow read: if isReportOwner(reportId) || isAdmin();
+        allow create, update, delete: if false;
+      }
+
+      // 2b. Sub-koleksi statusHistory (append-only oleh server tepercaya — docs/02-ERD.md §4)
+      match /statusHistory/{eventId} {
+        allow read: if isReportOwner(reportId) || isAdmin();
+        allow create, update, delete: if false;
+      }
+    }
+
+    // 3. conversations/{conversationId} & messages (CHAT-01..CHAT-03)
+    match /conversations/{conversationId} {
+      allow read: if isConversationParticipant(resource.data);
+      allow create: if isReporter()
+        && request.resource.data.reporterId == request.auth.uid
+        && request.resource.data.type == 'report_admin'
+        && request.resource.data.status == 'open'
+        && request.resource.data.keys().hasOnly([
+          'type', 'reporterId', 'assignedAdminId', 'reportId', 'status', 'createdAt', 'updatedAt'
+        ]);
+      allow update, delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isConversationParticipant(
+          get(/databases/$(database)/documents/conversations/$(conversationId)).data
+        );
+        allow create: if isConversationParticipant(
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data
+          )
+          && get(/databases/$(database)/documents/conversations/$(conversationId)).data.status == 'open'
+          && request.resource.data.senderUid == request.auth.uid
+          && request.resource.data.body is string
+          && request.resource.data.body.size() >= 1
+          && request.resource.data.body.size() <= 10000
+          && request.resource.data.keys().hasOnly(['senderUid', 'body', 'createdAt', 'attachmentPath']);
+        allow update, delete: if false;
+      }
+    }
+
+    // 4. knowledgeDocuments & knowledgeChunks (KB-01..KB-03)
+    match /knowledgeDocuments/{documentId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /knowledgeChunks/{chunkId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // 5. auditEvents (docs/05-BACKEND-ARCHITECTURE.md §7 & PRIV-01: tidak dapat dibaca reporter & tidak dapat dimodifikasi client)
+    match /auditEvents/{eventId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Default-deny untuk seluruh koleksi lain
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
 }

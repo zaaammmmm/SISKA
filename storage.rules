@@ -1,10 +1,50 @@
 rules_version = '2';
 service firebase.storage {
- match /b/{bucket}/o {
-  function signedIn(){ return request.auth != null; }
-  function isAdmin(){ return signedIn() && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin'; }
-  match /evidences/{reportId}/{fileName} { allow read: if signedIn() && (isAdmin() || firestore.get(/databases/(default)/documents/reports/$(reportId)).data.reporterId == request.auth.uid); allow create: if signedIn() && request.resource.size < 10 * 1024 * 1024 && request.resource.contentType.matches('image/.*|application/pdf') && firestore.get(/databases/(default)/documents/reports/$(reportId)).data.reporterId == request.auth.uid; allow update, delete: if false; }
-  match /knowledge-base/{fileName} { allow read, write: if isAdmin() && request.resource.size < 25 * 1024 * 1024 && request.resource.contentType == 'application/pdf'; }
-  match /{allPaths=**} { allow read, write: if false; }
- }
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.role == 'admin';
+    }
+
+    function isReportOwner(reportId) {
+      return signedIn() &&
+        firestore.exists(/databases/(default)/documents/reports/$(reportId)) &&
+        firestore.get(/databases/(default)/documents/reports/$(reportId)).data.reporterId == request.auth.uid;
+    }
+
+    function isAllowedEvidenceMime() {
+      return request.resource.contentType == 'application/pdf' ||
+        request.resource.contentType == 'image/jpeg' ||
+        request.resource.contentType == 'image/png';
+    }
+
+    // Path kanonis bukti laporan (seed-data.mjs & EvidenceService): reports/{reportId}/evidence/{fileName}
+    // Batas ukuran 5 MiB & MIME allowlist (docs/04-API-SPEC.yaml & FILE-01..FILE-03)
+    match /reports/{reportId}/evidence/{fileName} {
+      allow read: if isAdmin() || isReportOwner(reportId);
+      allow create: if isReportOwner(reportId)
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && isAllowedEvidenceMime();
+      allow update, delete: if false;
+    }
+
+    // Path kanonis dokumen Knowledge Base (seed-data.mjs & KnowledgeBaseService): knowledge-base/{docId}/{fileName}
+    match /knowledge-base/{docId}/{fileName} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.size > 0
+        && request.resource.size <= 25 * 1024 * 1024
+        && request.resource.contentType == 'application/pdf';
+      allow delete: if isAdmin();
+    }
+
+    // Default-deny untuk seluruh path lain
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
 }
