@@ -23,7 +23,7 @@ Letakkan folder ini di root repo SISKA (sejajar dengan `firebase/`), lalu:
 cp firebase/firebase.json.example firebase.json        # sekali saja
 firebase emulators:start --project demo-siska          # terminal 1 (Auth 9099, Firestore 8080, Storage 9199)
 
-cd siska-firebase-seed && npm install                  # terminal 2
+cd siska && npm install                                # terminal 2
 npm run seed:dry                                       # validasi tanpa Firebase
 npm run seed                                           # seed ke emulator
 ```
