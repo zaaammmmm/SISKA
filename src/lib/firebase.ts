@@ -55,7 +55,7 @@ if (useEmulator && firebaseApp && !globalForEmulator.__siskaClientEmulatorsConne
       connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
     }
     if (db) {
-      connectFirestoreEmulator(db, '127.0.0.1', 8080);
+      connectFirestoreEmulator(db, '127.0.0.1', 8085);
     }
     if (storage) {
       connectStorageEmulator(storage, '127.0.0.1', 9199);

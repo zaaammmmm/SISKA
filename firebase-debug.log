@@ -1,0 +1,26 @@
+[debug] [2026-10-30T18:47:38.655Z] ----------------------------------------------------------------------
+[debug] [2026-10-30T18:47:38.658Z] Command:       C:\nvm4w\nodejs\node.exe C:\Users\binta\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\firebase-tools\lib\bin\firebase.js emulators:start --project demo-siska
+[debug] [2026-10-30T18:47:38.658Z] CLI Version:   15.34.2
+[debug] [2026-10-30T18:47:38.658Z] Platform:      win32
+[debug] [2026-10-30T18:47:38.658Z] Node Version:  v22.23.4
+[debug] [2026-10-30T18:47:38.659Z] Detected Agent: unknown
+[debug] [2026-10-30T18:47:38.659Z] Time:          Sat Oct 31 2026 01:47:38 GMT+0700 (Western Indonesia Time)
+[debug] [2026-10-30T18:47:38.659Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-30T18:47:38.669Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-10-30T18:47:40.241Z] java version "23.0.2" 2025-01-21
+Java(TM) SE Runtime Environment (build 23.0.2+7-58)
+Java HotSpot(TM) 64-Bit Server VM (build 23.0.2+7-58, mixed mode, sharing)
+
+[debug] [2026-10-30T18:47:40.256Z] Parsed Java major version: 23
+[info] i  emulators: Starting emulators: auth, firestore, storage {"metadata":{"emulator":{"name":"hub"},"message":"Starting emulators: auth, firestore, storage"}}
+[info] i  emulators: Detected demo project ID "demo-siska", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail. {"metadata":{"emulator":{"name":"hub"},"message":"Detected demo project ID \"demo-siska\", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail."}}
+[debug] [2026-10-30T18:47:40.270Z] [logging] Logging Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-10-30T18:47:40.270Z] [auth] Authentication Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-10-30T18:47:40.270Z] [firestore] Firestore Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-10-30T18:47:40.270Z] [firestore.websocket] websocket server for firestore only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-10-30T18:47:40.270Z] [storage] Storage Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-10-30T18:47:40.270Z] assigned listening specs for emulators {"user":{"hub":[{"address":"127.0.0.1","family":"IPv4","port":4400},{"address":"::1","family":"IPv6","port":4400}],"ui":[{"address":"127.0.0.1","family":"IPv4","port":4000},{"address":"::1","family":"IPv6","port":4000}],"logging":[{"address":"127.0.0.1","family":"IPv4","port":4500}],"auth":[{"address":"127.0.0.1","family":"IPv4","port":9099}],"firestore":[{"address":"127.0.0.1","family":"IPv4","port":8085}],"firestore.websocket":[{"address":"127.0.0.1","family":"IPv4","port":9150}],"storage":[{"address":"127.0.0.1","family":"IPv4","port":9199}]},"metadata":{"message":"assigned listening specs for emulators"}}
+[debug] [2026-10-30T18:47:40.276Z] Write emulator hub locator at C:\Users\binta\AppData\Local\Temp\hub-demo-siska.json
+[info] i  firestore: downloading cloud-firestore-emulator-v1.22.0.jar... {"metadata":{"emulator":{"name":"firestore"},"message":"downloading cloud-firestore-emulator-v1.22.0.jar..."}}
+[debug] [2026-10-30T18:47:40.291Z] >>> [apiv2][query] GET https://storage.googleapis.com/firebase-preview-drop/emulator/cloud-firestore-emulator-v1.22.0.jar 

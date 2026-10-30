@@ -66,7 +66,7 @@ if (flag('dry-run')) {
 
 // ── 2. Tentukan target & pengaman ──────────────────────────────────────
 if (flag('emulator')) {
-  process.env.FIRESTORE_EMULATOR_HOST ??= '127.0.0.1:8080';
+  process.env.FIRESTORE_EMULATOR_HOST ??= '127.0.0.1:8085';
   process.env.FIREBASE_AUTH_EMULATOR_HOST ??= '127.0.0.1:9099';
   if (svc.storage) process.env.FIREBASE_STORAGE_EMULATOR_HOST ??= '127.0.0.1:9199';
 }
