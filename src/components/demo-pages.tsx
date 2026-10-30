@@ -1,4 +1,26 @@
-"use client"; import Link from "next/link"; import {useState} from "react"; import {DashboardLayout,PageHeading,DemoNotice,Icon} from "@/components/ui";
+"use client"; import Link from "next/link"; import {useState} from "react"; import * as Icon from "lucide-react";
+import { AppShell } from "@/components/shell";
+
+function DashboardLayout({ admin = false, active, children }: { admin?: boolean; active?: string; children: React.ReactNode }) {
+  return <AppShell role={admin ? "admin" : "user"}>{children}</AppShell>;
+}
+
+function PageHeading({ title, description, eyebrow, action }: { title: string; description?: React.ReactNode; eyebrow?: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="page-head">
+      <div>
+        {eyebrow && <div className="eyebrow">{eyebrow}</div>}
+        <h1>{title}</h1>
+        {description && <p>{description}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function DemoNotice() {
+  return null;
+}
 const sample=[{id:'SIS-2026-0142',date:'21 Okt 2026',category:'Pelecehan seksual',status:'Dalam proses',cls:'amber'},{id:'SIS-2026-0138',date:'14 Okt 2026',category:'Kekerasan berbasis gender',status:'Menunggu tinjauan',cls:'blue'},{id:'SIS-2026-0104',date:'02 Okt 2026',category:'Pelecehan seksual',status:'Selesai',cls:''}];
 function Stats({admin=false}:{admin?:boolean}){return <div className="stats-grid">{(admin?[['Total laporan','24','Seluruh laporan masuk'],['Perlu ditinjau','6','Menunggu tindak lanjut'],['Dalam proses','8','Sedang ditangani'],['Selesai','10','Status selesai']]:[['Total laporan','3','Laporan yang kamu kirim'],['Dalam proses','1','Sedang ditangani'],['Menunggu','1','Menunggu tinjauan'],['Selesai','1','Telah ditindaklanjuti']]).map(([a,b,c])=><div className="stat" key={a}><div className="stat-label">{a}</div><div className="stat-number">{b}</div><div className="muted" style={{fontSize:10}}>{c}</div></div>)}</div>}
 function ReportTable({admin=false}:{admin?:boolean}){return <div className="table-wrap"><table><thead><tr><th>ID Laporan</th>{admin&&<th>Pelapor</th>}<th>Tanggal</th><th>Kategori</th><th>Status</th><th>Aksi</th></tr></thead><tbody>{sample.map((r,i)=><tr key={r.id}><td style={{fontWeight:800,color:'#315d58'}}>{r.id}</td>{admin&&<td>{['Pengguna A','Pengguna B','Pengguna C'][i]}</td>}<td>{r.date}</td><td>{r.category}</td><td><span className={'pill '+r.cls}>{r.status}</span></td><td><Link href={admin?`/admin/reports/${r.id}`:`/user/reports/${r.id}`} style={{fontWeight:800,color:'var(--teal)'}}>Detail <Icon.ChevronRight size={12} style={{display:'inline'}}/></Link></td></tr>)}</tbody></table></div>}

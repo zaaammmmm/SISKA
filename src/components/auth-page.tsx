@@ -16,7 +16,8 @@ import {
   signInWithEmailAndPassword,
   updateProfile,
 } from 'firebase/auth';
-import { Brand, Icon } from '@/components/ui';
+import { Logo as Brand } from '@/components/logo';
+import * as Icon from 'lucide-react';
 import { auth } from '@/lib/firebase';
 import {
   fetchMyProfile,
