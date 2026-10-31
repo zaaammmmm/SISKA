@@ -16,6 +16,12 @@
 
 import net from 'node:net';
 import { writeFileSync } from 'node:fs';
+
+// Muat .env.local jika ada (mempermudah seeding ke project dev/cloud tanpa konfigurasi manual)
+try {
+  process.loadEnvFile('.env.local');
+} catch {}
+
 import { buildDataset, validateDataset, DEMO_PASSWORD, kindOfPath } from './seed-data.mjs';
 
 const argv = process.argv.slice(2);
@@ -82,11 +88,10 @@ if (!isEmulator && needed.some(([, , h]) => h)) {
 }
 if (!needed.length) die('Tidak ada layanan yang dipilih untuk di-seed.');
 
-let projectId = opt('project') ?? process.env.GCLOUD_PROJECT ?? process.env.FIREBASE_PROJECT_ID;
-let password = process.env.SEED_PASSWORD;
+let projectId = opt('project') ?? process.env.FIREBASE_PROJECT_ID ?? process.env.GCLOUD_PROJECT;
+let password = process.env.SEED_PASSWORD || (isEmulator ? DEMO_PASSWORD : 'SiskaDemo#2026');
 if (isEmulator) {
   projectId ??= 'demo-siska';
-  password ??= DEMO_PASSWORD;
 } else {
   if (!flag('allow-remote')) die('Target bukan emulator. Jalankan dengan --emulator, atau (khusus dev/staging) --allow-remote --confirm-project=<id>.');
   if (!projectId) die('Project ID wajib diberikan (--project=<id>) untuk target nyata.');
@@ -109,13 +114,27 @@ if (isEmulator) {
 }
 
 // ── 3. Firebase Admin ──────────────────────────────────────────────────
-const { initializeApp } = await import('firebase-admin/app');
+const { initializeApp, cert } = await import('firebase-admin/app');
 const { getAuth } = await import('firebase-admin/auth');
 const { getFirestore } = await import('firebase-admin/firestore');
 const { getStorage } = await import('firebase-admin/storage');
 
 const storageBucket = process.env.SEED_STORAGE_BUCKET ?? `${projectId}.appspot.com`;
-initializeApp({ projectId, storageBucket });
+const adminOptions = { projectId, storageBucket };
+
+if (!isEmulator) {
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
+  const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
+  if (clientEmail && rawPrivateKey) {
+    adminOptions.credential = cert({
+      projectId,
+      clientEmail,
+      privateKey: rawPrivateKey.replace(/\\n/g, '\n'),
+    });
+  }
+}
+
+initializeApp(adminOptions);
 const auth = svc.auth ? getAuth() : null;
 const db = svc.firestore ? getFirestore() : null;
 const bucket = svc.storage ? getStorage().bucket() : null;
@@ -164,8 +183,8 @@ if (bucket) {
 
 console.log('\n✔ Seed selesai.\n');
 summary();
-if (isEmulator && auth) {
-  console.log(`\nAkun uji (password: ${password}) — hanya untuk emulator:`);
+if (auth) {
+  console.log(`\nAkun uji (password: ${password}):`);
   for (const u of dataset.authUsers) console.log(`  ${u.email.padEnd(24)} ${(u.claims?.role ?? '(tanpa role)').padEnd(12)} uid=${u.uid}`);
 }
 process.exit(0);
