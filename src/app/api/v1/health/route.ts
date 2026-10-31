@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
       service: 'siska-backend',
       apiVersion: 'v1',
       aiEngineMode: aiConfig.enabled
-        ? 'remote_fastapi_rag'
+        ? 'remote_ai_service_rag'
         : 'local_firestore_rag',
       timestamp: new Date().toISOString(),
     },
@@ -27,4 +27,3 @@ export async function GET(request: NextRequest) {
     200,
   );
 }
-

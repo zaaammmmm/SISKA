@@ -187,6 +187,13 @@ export interface AiChatResponse {
   escalationMessage: string | null;
 }
 
+export interface SerializedAiRagDocument {
+  file: string;
+  cite: string;
+  chunkCount: number;
+  source: 'notebook' | 'web';
+}
+
 /* ========================================================================== */
 /* 7. Admin Knowledge Base & Audit DTOs (`/api/v1/admin/*`)                   */
 /* ========================================================================== */

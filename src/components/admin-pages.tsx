@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell, Check, CalendarDays, CheckCircle2, Clock3, Copy, FileText, FileUp, Inbox, MessagesSquare, RefreshCw, Search,
   ShieldCheck, SlidersHorizontal, Trash2, User, Headset,
 } from "lucide-react";
 import { AppShell } from "@/components/shell";
+import { SiskaApiClientError, addAiRagDocumentByAdmin, deleteAiRagDocumentByAdmin, fetchAiRagDocumentsByAdmin, uploadAiRagPdfByAdmin } from "@/lib/api-client";
 import { ChatWorkspace, type Msg } from "@/components/chat";
 import { IncidentCard, PrivacyNote } from "@/components/report-parts";
 import { Note, PageHead, Pagination, ReportsTable, SelectField, StatusPill, Stepper, TextField, Toast } from "@/components/ui";
@@ -249,53 +250,210 @@ export function AdminChatPage() {
 
 /* ====================== Pengaturan admin (knowledge base) ================ */
 export function AdminSettingsPage() {
-  const [docs, setDocs] = useState([{ name: "Pedoman pengaduan kampus.pdf", meta: "PDF • data contoh" }, { name: "Panduan akses layanan.pdf", meta: "PDF • data contoh" }]);
+  const [docs, setDocs] = useState<Awaited<ReturnType<typeof fetchAiRagDocumentsByAdmin>>["items"]>([]);
   const [toast, setToast] = useState("");
+  const [error, setError] = useState("");
+  const [loadingDocs, setLoadingDocs] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deletingFile, setDeletingFile] = useState<string | null>(null);
   const closeToast = useCallback(() => setToast(""), []);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [picked, setPicked] = useState<File | null>(null);
+  const [file, setFile] = useState("");
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [cite, setCite] = useState("");
+  const [content, setContent] = useState("");
+
+  const loadDocuments = useCallback(async () => {
+    setLoadingDocs(true);
+    setError("");
+    try {
+      const result = await fetchAiRagDocumentsByAdmin();
+      setDocs(result.items);
+    } catch (requestError: unknown) {
+      setError(
+        requestError instanceof SiskaApiClientError
+          ? requestError.message
+          : "Daftar dokumen AI tidak dapat dimuat. Coba muat ulang halaman.",
+      );
+    } finally {
+      setLoadingDocs(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDocuments();
+  }, [loadDocuments]);
+
+  async function addDocument() {
+    setSaving(true);
+    setError("");
+    try {
+      const created = pdfFile
+        ? await uploadAiRagPdfByAdmin(pdfFile, cite)
+        : await addAiRagDocumentByAdmin({ file, cite, content });
+      setFile("");
+      setPdfFile(null);
+      setCite("");
+      setContent("");
+      if (fileRef.current) fileRef.current.value = "";
+      setToast(`Dokumen ditambahkan dan diindeks (${created.chunkCount} bagian).`);
+      await loadDocuments();
+    } catch (requestError: unknown) {
+      setError(
+        requestError instanceof SiskaApiClientError
+          ? requestError.message
+          : "Dokumen tidak dapat ditambahkan. Periksa koneksi lalu coba lagi.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeDocument(name: string) {
+    if (!window.confirm(`Hapus dokumen "${name}" dari sumber SISKA AI?`)) return;
+    setDeletingFile(name);
+    setError("");
+    try {
+      await deleteAiRagDocumentByAdmin(name);
+      setToast(`Dokumen "${name}" berhasil dihapus dari indeks.`);
+      await loadDocuments();
+    } catch (requestError: unknown) {
+      setError(
+        requestError instanceof SiskaApiClientError
+          ? requestError.message
+          : "Dokumen tidak dapat dihapus. Periksa koneksi lalu coba lagi.",
+      );
+    } finally {
+      setDeletingFile(null);
+    }
+  }
 
   return (
     <AppShell role="admin">
       <PageHead title="Pengaturan admin" subtitle="Kelola dokumen sumber dan indeks pengetahuan untuk SISKA AI." />
-      <div className="two-col wide-right" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
+      <div className="two-col wide-right">
         <section className="card">
-          <h3 className="side-title">Unggah dokumen PDF</h3>
+          <h3 className="side-title">Tambah sumber SISKA AI</h3>
           <div className="field" style={{ margin: "16px 0" }}>
-            <span className="label">Pilih file PDF</span>
-            <div className="dropzone" role="button" tabIndex={0} onClick={() => fileRef.current?.click()} onKeyDown={(e) => e.key === "Enter" && fileRef.current?.click()}>
-              <div className="top"><FileUp aria-hidden /> {picked ? picked.name : "Pilih file PDF"}</div>
-              <small>Dokumen harus diverifikasi sumber dan izinnya sebelum dipakai sebagai knowledge base.</small>
-              <input ref={fileRef} type="file" hidden accept="application/pdf" onChange={(e) => setPicked(e.target.files?.[0] ?? null)} />
+            <span className="label">Pilih atau isi dokumen Markdown/TXT/PDF</span>
+            <div className="dropzone" role="button" tabIndex={0} onClick={() => fileRef.current?.click()} onKeyDown={(event) => event.key === "Enter" && fileRef.current?.click()}>
+              <div className="top"><FileUp aria-hidden /> {file || "Pilih file .md atau .txt"}</div>
+              <small>PDF berteks diekstrak di backend; PDF hasil scan perlu OCR terlebih dahulu.</small>
+              <input
+                ref={fileRef}
+                type="file"
+                hidden
+                accept=".md,.txt,.pdf,text/markdown,text/plain,application/pdf"
+                onChange={async (event) => {
+                  const selected = event.target.files?.[0];
+                  if (!selected) return;
+                  setError("");
+                  try {
+                    setFile(selected.name);
+                    setCite(selected.name.replace(/\.(md|txt)$/i, "").replace(/[-_]/g, " "));
+                    if (/\.pdf$/i.test(selected.name)) {
+                      setPdfFile(selected);
+                      setCite(selected.name.replace(/\.pdf$/i, "").replace(/[-_]/g, " "));
+                      setContent("");
+                    } else {
+                      setPdfFile(null);
+                      setContent(await selected.text());
+                    }
+                  } catch {
+                    setError("Isi file tidak dapat dibaca. Coba pilih file teks lain.");
+                  }
+                }}
+              />
             </div>
           </div>
-          <button className="btn btn-primary" disabled={!picked} onClick={() => {
-            if (!picked) return;
-            setDocs([{ name: picked.name, meta: "PDF • baru diunggah (simulasi)" }, ...docs]);
-            setPicked(null); setToast("Dokumen ditambahkan • simulasi berhasil");
-          }}><FileUp aria-hidden /> Unggah dokumen</button>
+          <TextField
+            label="Nama file (unik, .md, .txt, atau .pdf)"
+            value={file}
+            onChange={(event) => {
+              const nextFile = event.target.value;
+              setFile(nextFile);
+              if (pdfFile && nextFile !== pdfFile.name) setPdfFile(null);
+            }}
+            placeholder="panduan-layanan.md"
+            maxLength={125}
+          />
+          <TextField
+            label="Judul sumber"
+            value={cite}
+            onChange={(event) => setCite(event.target.value)}
+            placeholder="Panduan layanan SISKA"
+            maxLength={200}
+          />
+          <label className="label" htmlFor="ai-document-content" style={{ marginTop: 13 }}>Isi dokumen</label>
+          <textarea
+            id="ai-document-content"
+            className="textarea"
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            placeholder={"# Judul bagian\n\nIsi informasi yang sudah diverifikasi."}
+            maxLength={30_000}
+            rows={8}
+          />
+          <p className="help">
+            {pdfFile
+              ? "Teks PDF diekstrak otomatis (maksimal 300.000 karakter). PDF hasil scan belum didukung tanpa OCR."
+              : "Maksimal 30.000 karakter. Jangan unggah data pribadi pelapor."}
+          </p>
+          <button
+            className="btn btn-primary"
+            disabled={saving || !file.trim() || !cite.trim() || (!content.trim() && !pdfFile)}
+            onClick={() => void addDocument()}
+            style={{ marginTop: 14 }}
+          >
+            <FileUp aria-hidden /> {saving ? "Menambahkan..." : "Tambah dan indeks dokumen"}
+          </button>
         </section>
         <section className="card">
-          <h3 className="side-title">Indeks knowledge base</h3>
-          <p className="prose" style={{ fontSize: 12, margin: "12px 0 17px" }}>Reindex akan memproses dokumen, membagi teks menjadi chunk, membuat embedding, dan memperbarui indeks pencarian.</p>
-          <button className="btn btn-outline" onClick={() => setToast("Reindex dijalankan • simulasi berhasil")}><RefreshCw aria-hidden /> Reindex knowledge base</button>
+          <h3 className="side-title">Cara kerja indeks AI</h3>
+          <p className="prose" style={{ fontSize: 12, margin: "12px 0 17px" }}>
+          Dokumen Markdown/TXT langsung dibagi menjadi bagian kecil dan dibuat embedding oleh AI service. PDF berteks diekstrak dan diindeks dengan penanda halaman; PDF hasil scan memerlukan OCR sebelum diunggah. Perubahan segera tersedia untuk percakapan baru; notebook tidak diperlukan untuk dokumen yang ditambahkan dari halaman ini.
+          </p>
+          <Note icon={ShieldCheck}>
+            PDF yang diunggah ke Knowledge Base Firebase dikelola terpisah. Pipeline AI service lokal ini menerima Markdown/TXT; gunakan teks hasil ekstraksi yang sudah diverifikasi bila ingin memasukkannya ke indeks chat.
+          </Note>
         </section>
       </div>
       <section className="card" style={{ marginTop: 17 }}>
-        <h3 className="side-title" style={{ marginBottom: 5 }}>Daftar dokumen</h3>
-        {docs.length === 0 && <p className="help">Belum ada dokumen.</p>}
-        {docs.map((d, i) => (
-          <div key={d.name + i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i === docs.length - 1 ? 0 : "1px solid var(--line)" }}>
+        <div className="section-head" style={{ margin: "0 0 8px" }}>
+          <h3 className="side-title" style={{ marginBottom: 0 }}>Daftar dokumen sumber AI</h3>
+          <button className="btn btn-outline btn-sm" onClick={() => void loadDocuments()} disabled={loadingDocs}>
+            <RefreshCw aria-hidden /> {loadingDocs ? "Memuat..." : "Muat ulang"}
+          </button>
+        </div>
+        {error && <p className="error-text" role="alert">{error}</p>}
+        {loadingDocs && <p className="help">Memuat daftar dokumen...</p>}
+        {!loadingDocs && docs.length === 0 && <p className="help">Belum ada dokumen sumber.</p>}
+        {docs.map((document, index) => (
+          <div key={document.file} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: index === docs.length - 1 ? 0 : "1px solid var(--line)" }}>
             <FileText aria-hidden size={17} color="var(--teal)" />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <b style={{ fontSize: 12, color: "var(--ink)" }}>{d.name}</b>
-              <div className="help" style={{ margin: "2.5px 0 0" }}>{d.meta}</div>
+              <b style={{ fontSize: 12, color: "var(--ink)" }}>{document.cite}</b>
+              <div className="help" style={{ margin: "2.5px 0 0" }}>
+                {document.file} • {document.chunkCount} bagian • {document.source === "web" ? "Ditambahkan admin" : "Sumber export awal"}
+              </div>
             </div>
-            <button className="btn-ghost-danger" aria-label={`Hapus ${d.name}`} onClick={() => setDocs(docs.filter((_, j) => j !== i))}><Trash2 size={15} /></button>
+            {document.source === "web" ? (
+              <button
+                className="btn-ghost-danger"
+                aria-label={`Hapus ${document.file}`}
+                title="Hapus dokumen admin"
+                disabled={deletingFile !== null}
+                onClick={() => void removeDocument(document.file)}
+              >
+                {deletingFile === document.file ? "Menghapus..." : <Trash2 size={15} />}
+              </button>
+            ) : (
+              <span className="help">Sumber dasar</span>
+            )}
           </div>
         ))}
       </section>
-      <div style={{ marginTop: 17 }}><Note icon={ShieldCheck}>Dokumen yang diunggah hanya dipakai sebagai sumber informasi umum SISKA AI dan tidak boleh memuat data pribadi pengguna.</Note></div>
+      <div style={{ marginTop: 17 }}><Note icon={ShieldCheck}>Dokumen yang diunggah hanya dipakai sebagai sumber informasi umum SISKA AI dan tidak boleh memuat data pribadi pengguna. Dokumen export awal tidak dapat dihapus dari halaman ini.</Note></div>
       {toast && <Toast message={toast} onClose={closeToast} />}
     </AppShell>
   );

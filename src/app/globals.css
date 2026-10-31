@@ -368,6 +368,10 @@ table.tbl { width: 100%; min-width: 660px; border-collapse: collapse; table-layo
 .mode-top em { margin-left: auto; font-style: normal; font-size: 9px; font-weight: 700; color: var(--teal); }
 .mode-card p { margin: 9px 0 0 31px; font-size: 10px; color: var(--muted); }
 .chat { display: grid; grid-template-columns: 212px minmax(0, 1fr); background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; height: 486px; box-shadow: var(--shadow); }
+.chat.ai-chat { grid-template-columns: minmax(0, 1fr); }
+.ai-chat-empty { margin: auto; max-width: 520px; text-align: center; }
+.ai-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; }
+.ai-chat-error { margin-left: 33px; }
 .chat.tall { height: 469px; }
 .chat-list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .chat-list-head { padding: 19px 17px 12px; }

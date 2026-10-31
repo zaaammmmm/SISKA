@@ -1,0 +1,13 @@
+{
+  "name": "siska-ai-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Layanan RAG SISKA (backend chatbot). Node.js murni tanpa dependensi npm, sehingga tidak ada node_modules.",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test"
+  }
+}

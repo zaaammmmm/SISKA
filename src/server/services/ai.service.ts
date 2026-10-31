@@ -96,12 +96,6 @@ const EMERGENCY_SAFETY_PATTERNS = [
   /butuh\s+pertolongan\s+segera/i,
 ];
 
-const APPROVED_ESCALATION_MESSAGE =
-  'SISKA AI adalah asisten informasi umum dan bukan kanal layanan darurat. ' +
-  'Jika Anda berada dalam kondisi darurat atau membutuhkan pendampingan segera, ' +
-  'silakan hubungi petugas melalui fitur Chat SISKA atau merujuk pada kontak resmi: ' +
-  '[KONTAK RESMI KAMPUS - BELUM DITETAPKAN].';
-
 function containsPattern(text: string, patterns: readonly RegExp[]): boolean {
   return patterns.some((re) => re.test(text));
 }
@@ -113,7 +107,7 @@ function containsPattern(text: string, patterns: readonly RegExp[]): boolean {
  * 1. TIDAK PERNAH membaca koleksi `reports`, `evidence`, atau `conversations` (NFR-PRIV-02 & AI-04).
  * 2. Menolak upaya prompt injection pada pertanyaan pengguna maupun di dalam chunk dokumen (AI-03).
  * 3. Memberikan panduan eskalasi terverifikasi tanpa mengarang nomor kontak saat terdeteksi kondisi darurat (AI-05).
- * 4. Jika microservice eksternal FastAPI (`AI_SERVICE_URL`) dikonfigurasi dan aktif, meneruskan hanya pertanyaan
+ * 4. Jika AI Service eksternal (`AI_SERVICE_URL`) dikonfigurasi dan aktif, meneruskan hanya pertanyaan
  *    yang sudah lolos filter dengan batas waktu ketat (`REL-01`). Jika tidak terjangkau/belum jalan,
  *    melakukan retrieval terverifikasi langsung dari koleksi `knowledgeDocuments` (`status == 'indexed'`)
  *    dan `knowledgeChunks` di Firestore, atau menyatakan abstain (`grounded: false`) bila bukti tidak cukup (`AI-02`).
@@ -126,19 +120,7 @@ export async function answerGeneralQuestion(
   requireRole(caller, ['reporter', 'admin']);
   const queryText = input.message.trim();
 
-  // 1. Guardrail Kondisi Darurat (AI-05)
-  const isEmergency = containsPattern(queryText, EMERGENCY_SAFETY_PATTERNS);
-  if (isEmergency) {
-    return {
-      answer:
-        'Kami memahami situasi ini mendesak. SISKA AI hanya menyediakan informasi prosedur umum dan tidak dapat menangani kondisi darurat secara langsung.',
-      grounded: false,
-      sources: [],
-      escalationMessage: APPROVED_ESCALATION_MESSAGE,
-    };
-  }
-
-  // 2. Guardrail Prompt Injection & Akses Data Laporan Pribadi (AI-03 & AI-04)
+  // 1. Guardrail Prompt Injection & Akses Data Laporan Pribadi (AI-03 & AI-04)
   if (
     containsPattern(queryText, PROMPT_INJECTION_PATTERNS) ||
     containsPattern(queryText, PRIVATE_CASE_DATA_PATTERNS)
@@ -151,21 +133,39 @@ export async function answerGeneralQuestion(
       escalationMessage: null,
     };
   }
+  const isEmergency = containsPattern(queryText, EMERGENCY_SAFETY_PATTERNS);
 
-  // 3. Coba panggil microservice FastAPI RAG melalui kontrak server-to-server jika diaktifkan (REL-01)
+  // 2. Coba panggil AI RAG Service melalui kontrak server-to-server jika diaktifkan (REL-01).
+  // Pertanyaan darurat juga perlu mencapai RAG agar kontak resmi terverifikasi dapat diberikan.
   const remoteResponse = await callRemoteAiChat(
     {
       message: queryText,
       conversationId: input.conversationId,
+      userId: caller.uid,
     },
     requestId,
   );
-  if (remoteResponse) {
+  if (
+    remoteResponse &&
+    (!isEmergency || (remoteResponse.grounded && remoteResponse.sources.length > 0))
+  ) {
     return {
       answer: remoteResponse.answer,
       grounded: remoteResponse.grounded,
       sources: remoteResponse.sources,
       escalationMessage: remoteResponse.escalationMessage ?? null,
+    };
+  }
+
+  // 3. Jika RAG remote tidak tersedia, jangan mengarang nomor atau menyajikan placeholder kontak.
+  if (isEmergency) {
+    return {
+      answer:
+        'Kami memahami situasi ini mendesak. SISKA AI tidak dapat menangani kondisi darurat secara langsung.',
+      grounded: false,
+      sources: [],
+      escalationMessage:
+        'Jika ada bahaya langsung, hubungi layanan darurat setempat. Untuk bantuan SISKA, gunakan fitur Chat dengan Admin.',
     };
   }
 

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { signOut, updateProfile, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "firebase/auth";
 import { AppShell } from "@/components/shell";
+import { AiChatPanel } from "@/components/ai-chat";
 import { ChatWorkspace, type Msg } from "@/components/chat";
 import { IncidentCard, PrivacyNote } from "@/components/report-parts";
 import {
@@ -331,28 +332,12 @@ export function UserChatPage() {
   );
 }
 
-const aiConversations = [
-  { id: "ai1", title: "Percakapan baru", time: "10.24", line1: "SISKA AI", line2: "Informasi layanan", kind: "ai" as const },
-  { id: "ai2", title: "Alur pelaporan", time: "09.40", line1: "SISKA AI", line2: "Panduan layanan", kind: "ai" as const },
-];
-
 export function UserAiPage() {
   return (
     <AppShell role="user">
       <PageHead title="Chatbot AI" subtitle="Asisten informasi awal, terpisah dari petugas manusia." />
       <ModeCards active="ai" />
-      <ChatWorkspace
-        conversations={aiConversations}
-        initialThread={[{ id: "g", from: "them", author: "SISKA AI", time: "10.24", text: "Halo, saya SISKA AI. Saya dapat membantu menjelaskan informasi umum tentang alur pelaporan dan layanan yang tersedia. Saya bukan layanan darurat atau pengganti pendamping profesional." }]}
-        header={{ icon: Bot, title: "SISKA AI • Asisten informasi", subtitle: "Jawaban AI perlu diverifikasi untuk informasi penting", chip: <span className="chip chip-teal">Chat AI</span> }}
-        dateLabel="15 Oktober 2026 • Riwayat percakapan ilustrasi"
-        meLabel="Kamu"
-        placeholder="Tanyakan informasi umum..."
-        helper="Jangan masukkan nama, kronologi rinci, atau data pribadi. Balasan di sini hanya simulasi."
-        autoReply={{ author: "SISKA AI", text: "Terima kasih atas pertanyaanmu. Ini adalah balasan simulasi; integrasi AI produksi perlu dihubungkan melalui backend tepercaya. Untuk hal yang bersifat pribadi, silakan pilih Chat dengan Admin." }}
-        allowAttach={false}
-        listTitle="Riwayat chat AI"
-      />
+      <AiChatPanel />
       <div style={{ marginTop: 19 }}>
         <Note>Privasi: AI hanya memberi informasi awal. Jawabannya bukan nasihat medis atau hukum dan bukan pengganti pendamping profesional.</Note>
       </div>

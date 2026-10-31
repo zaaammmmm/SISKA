@@ -630,7 +630,7 @@ test('KB-01..KB-03 & AI-01..AI-05: Ingestion PDF otomatis (indexed vs failed), r
   assert.equal(aiInjection.grounded, false);
   assert.equal(aiInjection.sources.length, 0);
 
-  // AI-05: Pertanyaan kondisi darurat mengembalikan panduan eskalasi resmi tanpa mengarang nomor kontak
+  // AI-05: Tanpa RAG remote, kondisi darurat harus memberi eskalasi aman tanpa placeholder kontak.
   const aiEmergency = await answerGeneralQuestion(
     CALLER_REPORTER_A,
     {
@@ -640,11 +640,66 @@ test('KB-01..KB-03 & AI-01..AI-05: Ingestion PDF otomatis (indexed vs failed), r
     'req_ai_05',
   );
   assert.equal(aiEmergency.grounded, false);
-  assert.ok(
-    aiEmergency.escalationMessage?.includes(
-      '[KONTAK RESMI KAMPUS - BELUM DITETAPKAN]',
-    ),
-  );
+  assert.match(aiEmergency.escalationMessage ?? '', /layanan darurat setempat/);
+  assert.doesNotMatch(aiEmergency.escalationMessage ?? '', /KONTAK RESMI KAMPUS/);
+});
+
+test('AI-05: pertanyaan darurat diteruskan ke RAG dan kontak terverifikasi dikembalikan', async () => {
+  const savedEnv = {
+    url: process.env.AI_SERVICE_URL,
+    enabled: process.env.AI_SERVICE_ENABLE_REMOTE,
+    secret: process.env.AI_SERVICE_SHARED_SECRET,
+  };
+  const originalFetch = globalThis.fetch;
+  let sentPayload;
+
+  process.env.AI_SERVICE_URL = 'http://ai-service.test';
+  process.env.AI_SERVICE_ENABLE_REMOTE = 'true';
+  process.env.AI_SERVICE_SHARED_SECRET = 'test-secret';
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), 'http://ai-service.test/chat');
+    sentPayload = JSON.parse(init.body);
+    return new Response(
+      JSON.stringify({
+        answer: 'Untuk kondisi darurat, hubungi Polri pada 110.',
+        grounded: true,
+        sources: [
+          {
+            documentId: 'kontak-bantuan.md',
+            title: 'Kontak dan Bantuan Darurat',
+            page: 0,
+          },
+        ],
+        escalationMessage: null,
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+
+  try {
+    const response = await answerGeneralQuestion(
+      CALLER_REPORTER_A,
+      {
+        message: 'Aku butuh nomor darurat yang bisa dihubungi secepatnya.',
+        conversationId: 'emergency-test',
+      },
+      'req_ai_05_remote',
+    );
+
+    assert.equal(sentPayload.message, 'Aku butuh nomor darurat yang bisa dihubungi secepatnya.');
+    assert.equal(sentPayload.userId, CALLER_REPORTER_A.uid);
+    assert.equal(response.grounded, true);
+    assert.match(response.answer, /110/);
+    assert.equal(response.sources[0].documentId, 'kontak-bantuan.md');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (savedEnv.url === undefined) delete process.env.AI_SERVICE_URL;
+    else process.env.AI_SERVICE_URL = savedEnv.url;
+    if (savedEnv.enabled === undefined) delete process.env.AI_SERVICE_ENABLE_REMOTE;
+    else process.env.AI_SERVICE_ENABLE_REMOTE = savedEnv.enabled;
+    if (savedEnv.secret === undefined) delete process.env.AI_SERVICE_SHARED_SECRET;
+    else process.env.AI_SERVICE_SHARED_SECRET = savedEnv.secret;
+  }
 });
 
 // ── 8. PRIV-01, Rate Limiting, & Integritas Spesifikasi ────────────────────
@@ -780,5 +835,4 @@ test('LANGKAH-10: Struktur modul kanonis Firebase, Server Barrel, API Manifest, 
     null,
   );
 });
-
 

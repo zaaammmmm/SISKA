@@ -8,7 +8,7 @@ SISKA AI menjawab pertanyaan informasi umum berdasarkan dokumen terverifikasi: e
 flowchart TD
   U[User chat UI] --> W[Next.js API /ai/chat]
   W --> A[Auth, rate limit, input policy]
-  A --> R[FastAPI RAG service]
+  A --> R[Node.js RAG service]
   R --> Q[Query normalization / safety gate]
   Q --> E[Embedding: Qwen3-Embedding-0.6B]
   E --> V[Vector retrieval + metadata filter]
@@ -21,30 +21,30 @@ flowchart TD
   AB --> O
   O --> W
   W --> U
-  AD[Admin] --> KB[Protected PDF upload/list/delete/reindex]
-  KB --> I[Parse, OCR if approved, chunk, hash, embed]
+  AD[Admin] --> KB[Protected PDF or text upload/list/delete]
+  KB --> I[Extract text, chunk, embed; OCR scanned PDFs before upload]
   I --> V
 ```
 
 ## 3. Endpoints
 - `GET /health`: readiness only; no secret/environment values in response.
 - `POST /chat`: `{message, conversationId?}` → `{answer, grounded, sources[], escalationMessage?}`.
-- `POST /admin/documents`: admin-only upload PDF, validate and queue indexing.
-- `GET /admin/documents`: metadata and indexing status.
-- `DELETE /admin/documents/{id}`: remove source, chunks, vector entries and cached copies.
-- `POST /admin/reindex`: idempotent reindex job.
-Admin endpoints must be protected by trusted server identity; do not expose the FastAPI service publicly without authentication. Prefer API gateway/service-to-service auth and network restrictions.
+- SISKA exposes authenticated admin routes at `/api/v1/admin/ai-documents` for listing, adding, and deleting chat-RAG documents.
+- The AI service exposes the corresponding server-to-server routes at `/admin/rag-docs`; they require `X-Service-Authorization`.
+- Markdown/TXT content is chunked directly. Uploaded PDF text is extracted by the SISKA backend (25 MiB file and 300,000 extracted-character limits), then chunked and embedded by the AI service.
+- Scanned/image-only PDFs require OCR and review before upload. The original PDF is not stored in the chat-RAG index; extracted text and embeddings are stored in the local export index.
+- `/admin/reindex` reloads the current exported artifacts; it does not ingest PDFs from Firebase Storage.
+- The Firebase Knowledge Base at `/api/v1/admin/knowledge-documents` is a separate pipeline and does not automatically add its PDFs to the chat-RAG index.
+Admin endpoints must be protected by trusted server identity; do not expose the AI service publicly without authentication. Prefer API gateway/service-to-service auth and network restrictions.
 
 ## 4. Ingestion pipeline
-1. Admin uploads approved PDF; validate size, MIME and file signature.
-2. Compute SHA-256, persist private original, record uploader/source/version.
-3. Extract text; scanned PDF OCR only if approved and reviewed.
-4. Normalize whitespace and preserve title/page/section metadata.
-5. Chunk by semantic sections; initial experiment 500–800 tokens with 80–120 token overlap (tune empirically).
-6. Generate embeddings using Qwen3-Embedding-0.6B or evaluated alternative.
-7. Store chunks and vector metadata; publish document as indexed only after all steps succeed.
-8. On failure, mark `failed`, retain safe error code, allow retry; deletion removes all derived data.
-9. Review source authority, publication date, jurisdiction and version before indexing.
+1. Admin uploads an approved text-based PDF; the backend validates size, MIME and file signature.
+2. Extract searchable text per page; scanned/image-only files are rejected until OCR is performed and reviewed.
+3. Normalize whitespace and retain page headings in the extracted content.
+4. Chunk the text and generate embeddings using the active embedding model.
+5. Append chunks and vectors to the local RAG export index; the document becomes available to new chat requests.
+6. On failure, return an explicit error and do not report the upload as successful; deletion removes the indexed chunks.
+7. Review source authority, publication date, jurisdiction and version before indexing.
 
 ## 5. Retrieval and generation
 - Retrieve top-k candidates, apply source status/version filters, deduplicate and rerank if beneficial.
@@ -55,7 +55,7 @@ Admin endpoints must be protected by trusted server identity; do not expose the 
 - Avoid logging raw prompts/answers in production; use opt-in, redacted evaluation datasets.
 
 ## 6. Safety and escalation
-- Questions about immediate danger: display institution-approved emergency/contact information and encourage contacting local emergency/official services; do not invent contacts.
+- Questions about immediate danger: after prompt-injection and privacy checks, forward to the RAG service so institution-approved contacts can be returned with their source. If that service or its contact source is unavailable, give only general escalation guidance; never invent contacts or display an unconfigured placeholder.
 - Personal case/legal/medical/psychological advice: explain limitation and route to official human support.
 - Prompt injection: retrieved PDF content is data, never system instructions; test malicious text in documents.
 - Refusal/abstention: insufficient retrieval, conflicting sources, outdated material, requests to judge a case, or requests for private data.
@@ -69,7 +69,7 @@ Metrics: Recall@k/MRR for retrieval; citation precision; groundedness/faithfulne
 Environment keys (server only): `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`, `VECTOR_STORE_URL`, `AI_SERVICE_TOKEN`, `MAX_INPUT_CHARS`, `TOP_K`, `RELEVANCE_THRESHOLD`. Values are deployment-specific; no credentials in repository. Provide provider adapter so LLM backend can switch. Apply timeouts, bounded retries, request limits, concurrency limits and cost budgets.
 
 ## 9. Chat UI integration
-Use a visible toggle “Chat dengan Admin | SISKA AI” only if the mode distinction is clear. AI history may use localStorage as proposal suggests, but warn users not to enter report details and define device-sharing/privacy behavior. Server persistence requires explicit retention and access rules. AI and human chat must never be mixed into the same transcript without clear sender labels.
+Use a visible toggle “Chat dengan Admin | SISKA AI” only if the mode distinction is clear. The AI transcript and conversation ID are retained in `sessionStorage`, scoped by authenticated user, so navigation within the same browser tab preserves the conversation; closing the tab clears it. This is client-side display/context continuity, not server-side history. Warn users not to enter report details and define device-sharing/privacy behavior. Server persistence requires explicit retention and access rules. AI and human chat must never be mixed into the same transcript without clear sender labels.
 
 
 ## Keputusan platform

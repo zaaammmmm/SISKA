@@ -18,8 +18,10 @@ import type {
   PaginatedConversationsResult,
   PaginatedKnowledgeDocumentsResult,
   PaginatedMessagesResult,
+  PaginatedResponse,
   PaginatedReportsResult,
   ReportsSummaryResult,
+  SerializedAiRagDocument,
   SerializedConversation,
   SerializedKnowledgeDocument,
   SerializedMessage,
@@ -394,6 +396,46 @@ export async function askSiskaAiQuestion(
 
 // ── 6. Admin Knowledge Base & Audit API (/api/v1/admin/*) ──────────────────
 
+export async function fetchAiRagDocumentsByAdmin(): Promise<
+  PaginatedResponse<SerializedAiRagDocument>
+> {
+  return apiRequest<PaginatedResponse<SerializedAiRagDocument>>(
+    '/admin/ai-documents',
+    { method: 'GET' },
+  );
+}
+
+export async function addAiRagDocumentByAdmin(input: {
+  file: string;
+  cite: string;
+  content: string;
+}): Promise<SerializedAiRagDocument> {
+  return apiRequest<SerializedAiRagDocument>('/admin/ai-documents', {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export async function uploadAiRagPdfByAdmin(
+  file: File,
+  title?: string,
+): Promise<SerializedAiRagDocument> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (title) formData.append('title', title);
+  return apiRequest<SerializedAiRagDocument>('/admin/ai-documents', {
+    method: 'POST',
+    formData,
+  });
+}
+
+export async function deleteAiRagDocumentByAdmin(file: string): Promise<void> {
+  return apiRequest<void>('/admin/ai-documents', {
+    method: 'DELETE',
+    body: { file },
+  });
+}
+
 export async function fetchKnowledgeDocumentsByAdmin(): Promise<PaginatedKnowledgeDocumentsResult> {
   return apiRequest<PaginatedKnowledgeDocumentsResult>(
     '/admin/knowledge-documents',
@@ -453,7 +495,7 @@ export interface BackendHealthStatus {
   status: 'ok';
   service: string;
   apiVersion: string;
-  aiEngineMode: 'remote_fastapi_rag' | 'local_firestore_rag';
+  aiEngineMode: 'remote_ai_service_rag' | 'local_firestore_rag';
   timestamp: string;
 }
 
@@ -511,5 +553,3 @@ export const siskaApi = {
     listAuditEvents: fetchAuditEventsByAdmin,
   },
 } as const;
-
-
