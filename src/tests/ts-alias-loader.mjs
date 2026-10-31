@@ -76,8 +76,7 @@ registerHooks({
       return { url: firebaseMockUrl, shortCircuit: true };
     }
     if (
-      specifier === 'next/server' &&
-      !existsSync(resolvePath(projectRoot, 'node_modules/next'))
+      specifier === 'next/server'
     ) {
       return { url: nextServerShimUrl, shortCircuit: true };
     }
