@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 /** Emblem SISKA: perisai heksagon + figur orang + dua tangan yang menopang. */
@@ -24,15 +25,27 @@ export function Logo({
   tone?: "teal" | "white";
   href?: string | null;
 }) {
-  const color = tone === "white" ? "#ffffff" : "#0a7f82";
+  const safeSize = Math.max(size, 16);
+
   const inner = (
-    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 1.5, lineHeight: 1 }}>
-      <Emblem size={size} tone={tone} />
-      <span style={{ fontSize: size * 0.5, fontWeight: 800, letterSpacing: "0.02em", color }}>SISKA</span>
-    </span>
+    <Image
+      src="/siska.png"
+      alt="SISKA"
+      width={safeSize}
+      height={safeSize}
+      priority
+      style={{
+        display: "block",
+        width: safeSize,
+        height: safeSize,
+        objectFit: "contain",
+        filter: tone === "white" ? "brightness(0) invert(1)" : "none",
+      }}
+    />
   );
+
   return href ? (
-    <Link href={href} aria-label="SISKA — Beranda" style={{ display: "inline-flex" }}>
+    <Link href={href} aria-label="SISKA — Beranda" style={{ display: "inline-flex", alignItems: "center" }}>
       {inner}
     </Link>
   ) : (

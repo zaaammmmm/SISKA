@@ -304,7 +304,7 @@ function ModeCards({ active }: { active: "admin" | "ai" }) {
 export function UserChatPage() {
   return (
     <AppShell role="user">
-      <PageHead title="Chat dengan Admin" subtitle={hasAtt ? "Contoh pemilihan lampiran • file belum dikirim." : "Percakapan dengan petugas manusia, terpisah dari SISKA AI."} />
+      <PageHead title="Chat dengan Admin" subtitle="Percakapan dengan petugas manusia, terpisah dari SISKA AI." />
       <ModeCards active="admin" />
       <ChatWorkspace
         liveRole="reporter"

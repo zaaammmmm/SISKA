@@ -7,6 +7,11 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "sw
 export const metadata: Metadata = {
   title: "SISKA — Sistem Informasi Pengaduan Kekerasan Seksual",
   description: "Sarana pengaduan yang terstruktur dan menjaga kerahasiaan informasi.",
+  icons: {
+    icon: "/siska.png",
+    shortcut: "/siska.png",
+    apple: "/siska.png",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

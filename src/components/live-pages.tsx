@@ -177,18 +177,21 @@ function ConversationChat({admin}:{admin:boolean}) {
  const reporterIdsKey=useMemo(()=>JSON.stringify(Array.from(new Set(conversations.map(item=>item.reporterId).filter(Boolean))).sort()),[conversations]);
  useEffect(()=>{
   // Hanya admin yang perlu membaca profil reporter lain; reporter tidak perlu listener profil tambahan.
-  if(!admin||!db||!auth?.currentUser)return;
+  const firestore = db;
+  if(!admin || !firestore || !auth?.currentUser) return;
   const reporterIds=JSON.parse(reporterIdsKey) as string[];
-  if(!reporterIds.length)return;
-  const unsubscribers=reporterIds.map(reporterId=>onSnapshot(doc(db,"users",reporterId),snapshot=>{
-   const data=snapshot.data();
-   const displayName=typeof data?.displayName==="string"?data.displayName.trim():"";
-   setReporterNames(old=>({...old,[reporterId]:displayName||"Pengguna SISKA"}));
-  },listenerError=>{
-   if(!auth?.currentUser)return;
-   console.error(`[SISKA CHAT] Reporter profile listener (${reporterId}):`,listenerError);
-   setReporterNames(old=>({...old,[reporterId]:old[reporterId]||"Pengguna SISKA"}));
+  if(!reporterIds.length) return;
+
+  const unsubscribers=reporterIds.map(reporterId => onSnapshot(doc(firestore, "users", reporterId), snapshot => {
+    const data=snapshot.data();
+    const displayName=typeof data?.displayName==="string" ? data.displayName.trim() : "";
+    setReporterNames(old => ({ ...old, [reporterId]: displayName || "Pengguna SISKA" }));
+  }, listenerError => {
+    if(!auth?.currentUser) return;
+    console.error(`[SISKA CHAT] Reporter profile listener (${reporterId}):`, listenerError);
+    setReporterNames(old => ({ ...old, [reporterId]: old[reporterId] || "Pengguna SISKA" }));
   }));
+
   const stop=()=>unsubscribers.splice(0).forEach(unsubscribe=>unsubscribe());
   window.addEventListener("siska:before-logout",stop);
   return ()=>{
