@@ -43,3 +43,6 @@ next-env.d.ts
 
 # Firebase emulator logs
 *-debug.log*
+
+# Catatan internal lokal
+BACKEND-STATUS.md
