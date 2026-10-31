@@ -1,2 +1,2 @@
-import { ProfilePage } from "@/components/user-pages";
-export default function Page() { return <ProfilePage />; }
+import { LiveProfilePage } from "@/components/live-pages";
+export default function Page() { return <LiveProfilePage />; }

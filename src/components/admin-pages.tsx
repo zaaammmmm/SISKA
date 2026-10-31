@@ -7,11 +7,11 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/shell";
 import { SiskaApiClientError, addAiRagDocumentByAdmin, deleteAiRagDocumentByAdmin, fetchAiRagDocumentsByAdmin, uploadAiRagPdfByAdmin } from "@/lib/api-client";
-import { ChatWorkspace, type Msg } from "@/components/chat";
+import { ChatWorkspace } from "@/components/chat";
 import { IncidentCard, PrivacyNote } from "@/components/report-parts";
 import { Note, PageHead, Pagination, ReportsTable, SelectField, StatusPill, Stepper, TextField, Toast } from "@/components/ui";
 import {
-  adminConversations, adminReports, DEMO_NOW, DEMO_NOW_SHORT, findReport, statusSteps, timeline, type Status,
+  adminReports, DEMO_NOW, DEMO_NOW_SHORT, findReport, statusSteps, timeline, type Status,
 } from "@/lib/demo-data";
 
 const count = (s: Status) => adminReports.filter((r) => r.status === s).length;
@@ -202,46 +202,24 @@ export function AdminReportDetail({ id }: { id: string }) {
 }
 
 /* ================================= Chat ================================= */
-const adminThread: Msg[] = [
-  { id: "m1", from: "them", author: "Petugas A • kamu", time: "10.24", text: "Halo, terima kasih sudah menghubungi SISKA. Kamu dapat melihat tahapan di Detail Laporan. Jika nyaman, kita bisa membahas pilihan dukungan yang ingin kamu ketahui." },
-];
-
 export function AdminChatPage() {
-  const [tab, setTab] = useState<"all" | "direct" | "ai">("all");
-  const list = useMemo(() => adminConversations.filter((c) => tab === "all" || c.kind === tab), [tab]);
-  const tabs = [["all", "Semua percakapan"], ["direct", "Chat langsung"], ["ai", "Dialihkan dari SISKA AI"]] as const;
   return (
     <AppShell role="admin">
-      <PageHead title="Chat pengguna" subtitle="Bedakan chat langsung dan pengalihan informasi yang disetujui pengguna." />
-      <div className="search-row" style={{ alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <div className="chips" style={{ padding: 0 }} role="tablist">
-          {tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>)}
-        </div>
-        <span className="help" style={{ margin: 0 }}>2 belum dibaca • data ilustrasi</span>
-      </div>
+      <PageHead title="Chat pengguna" subtitle="Percakapan langsung dengan pelapor yang ditugaskan atau belum ditugaskan." />
       <ChatWorkspace
-        key={tab}
-        conversations={list}
-        initialThread={adminThread}
-        header={(c) => ({
-          icon: User,
-          title: `Pengguna demo • ${c?.title ?? ""}`,
-          subtitle: c?.kind === "ai" ? "Dialihkan dari SISKA AI • ringkasan disetujui pengguna" : "Chat langsung • petugas dan pengguna",
-          chip: <span className="chip chip-teal">Terbuka</span>,
-        })}
-        banner={(c) => c?.kind === "ai" ? (
-          <Note title="Ringkasan disetujui pengguna • persetujuan berbagi aktif">
-            Pengguna ingin mengetahui tahapan laporan dan pilihan pendampingan. Tidak ada identitas atau rincian kejadian yang dibagikan. Riwayat AI lengkap tidak ditampilkan.
-          </Note>
-        ) : null}
-        dateLabel="15 Oktober 2026 • Riwayat percakapan ilustrasi"
-        meLabel="Petugas A • kamu"
+        liveRole="admin"
+        conversations={[]}
+        initialThread={[]}
+        header={{ icon: User, title: "Pilih percakapan", subtitle: "Chat langsung dengan pelapor", chip: <span className="chip chip-teal">Real-time</span> }}
+        dateLabel="Percakapan langsung"
+        meLabel="Petugas SISKA"
         placeholder="Tulis balasan untuk pengguna..."
-        helper="Gunakan bahasa yang empatik. Demo ini tidak benar-benar mengirim balasan."
+        helper="Balasan dikirim dengan aman dan diterima otomatis oleh pelapor."
+        allowAttach={false}
       />
       <div style={{ marginTop: 19 }}>
         <Note title="Batas akses percakapan">
-          Hanya ringkasan yang disetujui pengguna ditampilkan untuk pengalihan AI. Jangan meminta riwayat AI lengkap atau rincian pribadi yang tidak diperlukan. Demo ini tidak menerima atau mengirim pesan.
+          Petugas hanya dapat membaca percakapan yang ditugaskan kepadanya atau yang belum ditugaskan. Pesan dan identitas pengirim diverifikasi oleh backend.
         </Note>
       </div>
     </AppShell>

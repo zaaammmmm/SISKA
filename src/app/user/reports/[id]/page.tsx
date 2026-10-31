@@ -1,5 +1,2 @@
-import { UserReportDetail } from "@/components/user-pages";
-export default async function Page({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  return <UserReportDetail id={id} />;
-}
+import { LiveUserReportDetail } from "@/components/live-pages";
+export default async function Page({ params }: { params: Promise<{ id: string }> }) { const { id } = await params; return <LiveUserReportDetail id={id} />; }

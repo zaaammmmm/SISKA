@@ -1,2 +1,2 @@
-import { HistoryPage } from "@/components/user-pages";
-export default function Page() { return <HistoryPage />; }
+import { LiveHistoryPage } from "@/components/live-pages";
+export default function Page() { return <LiveHistoryPage />; }

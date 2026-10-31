@@ -65,6 +65,10 @@ function serializeConversationDoc(
     status: (data.status as ConversationStatus) ?? 'open',
     createdAt: toIsoDateString(data.createdAt),
     updatedAt: toIsoDateString(data.updatedAt),
+    lastMessage: typeof data.lastMessage === 'string' ? data.lastMessage : null,
+    lastMessageSenderUid:
+      typeof data.lastMessageSenderUid === 'string' ? data.lastMessageSenderUid : null,
+    lastMessageAt: data.lastMessageAt ? toIsoDateString(data.lastMessageAt) : null,
   };
 }
 
@@ -330,6 +334,11 @@ export async function sendMessage(
     tx.create(msgRef, msgData);
     tx.update(convRef, {
       updatedAt: now,
+      // Metadata ringkas ini membuat preview daftar chat ikut realtime
+      // melalui listener dokumen conversations tanpa listener tambahan per pesan.
+      lastMessage: input.body.slice(0, 180),
+      lastMessageSenderUid: authorized.uid,
+      lastMessageAt: now,
       ...(authorized.role === 'admin' && !assignedAdminId
         ? { assignedAdminId: authorized.uid }
         : {}),

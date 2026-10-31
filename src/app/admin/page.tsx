@@ -1,2 +1,2 @@
-import { AdminDashboard } from "@/components/admin-pages";
-export default function Page() { return <AdminDashboard />; }
+import { LiveAdminDashboard } from "@/components/live-pages";
+export default function Page() { return <LiveAdminDashboard />; }

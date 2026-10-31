@@ -1,2 +1,2 @@
-import { UserChatPage } from "@/components/user-pages";
-export default function Page() { return <UserChatPage />; }
+import { LiveUserChatPage } from "@/components/live-pages";
+export default function Page() { return <LiveUserChatPage />; }

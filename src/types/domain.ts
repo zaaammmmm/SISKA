@@ -102,6 +102,10 @@ export interface ConversationDocument {
   status: ConversationStatus;
   createdAt: Date | string;
   updatedAt: Date | string;
+  /** Preview pesan terakhir untuk memperbarui daftar percakapan secara realtime. */
+  lastMessage?: string;
+  lastMessageSenderUid?: string;
+  lastMessageAt?: Date | string;
 }
 
 export interface MessageDocument {

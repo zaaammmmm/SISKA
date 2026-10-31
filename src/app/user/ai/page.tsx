@@ -1,2 +1,2 @@
-import { UserAiPage } from "@/components/user-pages";
-export default function Page() { return <UserAiPage />; }
+import { LiveUserAiPage } from "@/components/live-pages";
+export default function Page() { return <LiveUserAiPage />; }

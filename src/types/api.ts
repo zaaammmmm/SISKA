@@ -155,6 +155,9 @@ export interface SerializedConversation {
   status: ConversationStatus;
   createdAt: string;
   updatedAt: string;
+  lastMessage?: string | null;
+  lastMessageSenderUid?: string | null;
+  lastMessageAt?: string | null;
 }
 
 export type PaginatedConversationsResult =

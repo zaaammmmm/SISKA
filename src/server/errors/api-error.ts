@@ -205,8 +205,22 @@ export function toErrorResponse(
     );
   }
 
-  // Error tak terduga: catat hanya nama & kode error sistem tanpa menyalin objek request/payload
-  const safeErrorName = error instanceof Error ? error.name : 'UnknownError';
+  // Error tak terduga: catat diagnostik terbatas untuk korelasi request.
+  // Jangan pernah mencatat request body, header Authorization, token, atau objek error utuh.
+  const errorObject = error instanceof Error ? error : null;
+  const safeErrorName = errorObject?.name || 'UnknownError';
+  const rawMessage = errorObject?.message || String(error ?? 'Unknown error');
+  const safeErrorMessage = rawMessage
+    .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [REDACTED]')
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]')
+    .replace(/(private[_ -]?key|client[_ -]?secret|shared[_ -]?secret|password)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]')
+    .slice(0, 500);
+  const errorCode =
+    errorObject && 'code' in errorObject &&
+    (typeof errorObject.code === 'string' || typeof errorObject.code === 'number')
+      ? errorObject.code
+      : undefined;
+
   console.error(
     JSON.stringify({
       level: 'error',
@@ -214,6 +228,8 @@ export function toErrorResponse(
       code: 'INTERNAL_ERROR',
       status: 500,
       errorName: safeErrorName,
+      ...(errorCode !== undefined ? { errorCode } : {}),
+      errorMessage: safeErrorMessage,
       timestamp: new Date().toISOString(),
     }),
   );

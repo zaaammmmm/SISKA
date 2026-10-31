@@ -1,2 +1,2 @@
-import { AdminReportsPage } from "@/components/admin-pages";
-export default function Page() { return <AdminReportsPage />; }
+import { LiveHistoryPage } from "@/components/live-pages";
+export default function Page() { return <LiveHistoryPage admin />; }

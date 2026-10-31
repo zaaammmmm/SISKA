@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { signOut } from "firebase/auth";
 import {
-  Bell, BookOpen, Bot, ChevronDown, Copy, FilePlus2, Headset, HeartHandshake, LayoutGrid, LogOut, Menu,
+  BookOpen, Bot, ChevronDown, Copy, FilePlus2, Headset, HeartHandshake, LayoutGrid, LogOut, Menu, FileText,
   MessagesSquare, SlidersHorizontal, UserRound,
 } from "lucide-react";
 import { Logo } from "@/components/logo";
@@ -27,7 +27,8 @@ const NAV = {
     { href: "/admin", label: "Dashboard Admin", icon: LayoutGrid, exact: true },
     { href: "/admin/reports", label: "Kelola Laporan", icon: Copy },
     { href: "/admin/chat", label: "Chat Pengguna", icon: MessagesSquare },
-    { href: "/admin/documents", label: "Pengaturan Admin", icon: SlidersHorizontal },
+    { href: "/admin/documents", label: "Knowledge Base AI", icon: SlidersHorizontal },
+    { href: "/admin/audit", label: "Audit Log", icon: FileText },
   ],
 };
 
@@ -38,7 +39,7 @@ export function AppShell({ role, children }: { role: Role; children: React.React
   const [menu, setMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const admin = role === "admin";
-  const me = useCurrentUser(admin ? "Petugas A" : "Pengguna demo");
+  const me = useCurrentUser(admin ? "Petugas" : "Pengguna");
   const displayInitial = admin && !me.live ? "PA" : me.initial;
 
   useEffect(() => setOpen(false), [pathname]);
@@ -49,7 +50,9 @@ export function AppShell({ role, children }: { role: Role; children: React.React
   }, []);
 
   async function logout() {
-    try { if (auth) await signOut(auth); } finally { router.push("/login"); }
+    // Lepas seluruh listener Firestore sebelum token Auth dicabut oleh signOut().
+    window.dispatchEvent(new Event("siska:before-logout"));
+    try { if (auth) await signOut(auth); } finally { router.replace("/login"); }
   }
 
   const isActive = (n: { href: string; exact?: boolean }) =>
@@ -83,8 +86,7 @@ export function AppShell({ role, children }: { role: Role; children: React.React
             <span>SISKA / {admin ? "Administrasi layanan" : "Layanan dan pendampingan"}</span>
           </div>
           <div className="topbar-right">
-            <span className="chip">Demo • data ilustrasi</span>
-            <button className="bell" aria-label="Notifikasi"><Bell /></button>
+
             <span className="topbar-sep" />
             <div className="user-menu" ref={menuRef}>
               <button className="user-btn" onClick={() => setMenu((m) => !m)} aria-haspopup="menu" aria-expanded={menu}>

@@ -82,6 +82,9 @@ export const DEMO_NOW_SHORT = "15 Okt 2026 • 10.30";
 
 export type Conversation = {
   id: string; title: string; time: string; line1: string; line2: string; badge?: string; kind: "direct" | "ai";
+  /** Metadata internal untuk pemetaan identitas dan pengurutan percakapan live. */
+  reporterId?: string;
+  sortTime?: number;
 };
 
 export const userConversations: Conversation[] = [

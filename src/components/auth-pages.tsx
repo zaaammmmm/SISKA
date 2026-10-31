@@ -16,6 +16,7 @@ import {
   browserSessionPersistence,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
+  signOut,
   setPersistence,
   signInWithEmailAndPassword,
   updateProfile,
@@ -77,7 +78,7 @@ function AuthLayout({
           </ul>
         </div>
         <div className="auth-aside-foot">
-          Demo • data ilustrasi
+          SISKA • layanan pengaduan
           <br />
           SISKA bukan layanan darurat.
         </div>
@@ -117,12 +118,7 @@ export function LoginPage() {
     try {
       const normalizedEmail = email.trim();
       if (!auth) {
-        console.info(
-          '[SISKA] Firebase belum dikonfigurasi — login berjalan dalam mode demo.',
-        );
-        router.push(
-          normalizedEmail.toLowerCase().startsWith('admin') ? '/admin' : '/user',
-        );
+        setError('Firebase belum dikonfigurasi. Isi variabel NEXT_PUBLIC_FIREBASE_* sebelum login.');
         return;
       }
 
@@ -144,6 +140,11 @@ export function LoginPage() {
         resolvedRole = profile?.role;
       }
 
+      if (resolvedRole !== 'admin' && resolvedRole !== 'reporter') {
+        await signOut(auth);
+        setError('Akun belum memiliki profil atau peran SISKA yang valid. Hubungi administrator.');
+        return;
+      }
       router.push(resolvedRole === 'admin' ? '/admin' : '/user');
     } catch (err) {
       const code = (err as { code?: string })?.code ?? '';
@@ -271,27 +272,24 @@ export function RegisterPage() {
     setBusy(true);
     try {
       if (!auth) {
-        console.info(
-          '[SISKA] Firebase belum dikonfigurasi — registrasi berjalan dalam mode demo.',
-        );
-        router.push('/user');
+        setErrors({ form: 'Firebase belum dikonfigurasi. Isi variabel NEXT_PUBLIC_FIREBASE_* sebelum mendaftar.' });
         return;
       }
 
       const trimmedUsername = form.username.trim();
-      const credential = await createUserWithEmailAndPassword(
-        auth,
-        form.email.trim(),
-        form.password,
-      );
+      const normalizedEmail = form.email.trim().toLowerCase();
+      // Jika provisioning profil gagal setelah akun Auth dibuat, izinkan retry
+      // tanpa mencoba membuat akun Firebase kedua dengan email yang sama.
+      const existingUser = auth.currentUser?.email?.toLowerCase() === normalizedEmail
+        ? auth.currentUser
+        : null;
+      const credential = existingUser
+        ? { user: existingUser }
+        : await createUserWithEmailAndPassword(auth, normalizedEmail, form.password);
       await updateProfile(credential.user, { displayName: trimmedUsername });
 
-      // Provisioning profil pelapor di backend (`POST /api/v1/profile`)
-      await provisionInitialReporterProfile(trimmedUsername).catch(
-        () => undefined,
-      );
-      await credential.user.getIdToken(true).catch(() => undefined);
-
+      // Provisioning profil reporter dilakukan backend; kegagalan tidak disembunyikan.
+      await provisionInitialReporterProfile(trimmedUsername);
       router.push('/user');
     } catch (err) {
       const code = (err as { code?: string })?.code ?? '';
@@ -362,8 +360,7 @@ export function RegisterPage() {
               Saya telah membaca{' '}
               <Link href="/register/terms" className="link-teal">
                 Syarat dan Ketentuan
-              </Link>{' '}
-              (draft ilustrasi).
+              </Link>.
             </span>
           </label>
           {errors.agree && (
@@ -409,9 +406,11 @@ export function ForgotPage() {
     setError('');
     setBusy(true);
     try {
-      if (auth) {
-        await sendPasswordResetEmail(auth, email.trim());
+      if (!auth) {
+        setError('Firebase belum dikonfigurasi. Pemulihan password belum dapat dijalankan.');
+        return;
       }
+      await sendPasswordResetEmail(auth, email.trim());
       setSent(true);
     } catch (err) {
       const code = (err as { code?: string })?.code ?? '';
@@ -430,11 +429,6 @@ export function ForgotPage() {
       <AuthLayout crumb="User Pages / Konfirmasi">
         <div className="auth-form">
           <MailCheck className="auth-icon auth-icon-lg" aria-hidden />
-          {!auth && (
-            <span className="chip chip-teal" style={{ marginBottom: 19 }}>
-              Contoh konfirmasi
-            </span>
-          )}
           <h2>Periksa kotak masukmu</h2>
           <p className="sub">
             Jika email terdaftar, instruksi reset akan dikirim ke alamat
@@ -442,7 +436,6 @@ export function ForgotPage() {
           </p>
           <Note title="Belum menemukan email?">
             Periksa folder spam dan pastikan alamat email sudah benar.
-            {!auth && ' Pada demo ini, tidak ada email yang dikirim.'}
           </Note>
           <div className="auth-actions">
             <Link href="/login" className="btn btn-primary">
@@ -482,9 +475,7 @@ export function ForgotPage() {
           error={error}
         />
         <Note className="" icon={ShieldCheck}>
-          {auth
-            ? 'Demi keamanan, kami tidak menampilkan apakah email terdaftar atau tidak.'
-            : 'Ini adalah simulasi tampilan. Tidak ada email atau instruksi yang benar-benar dikirim.'}
+          Demi keamanan, kami tidak menampilkan apakah email terdaftar atau tidak.
         </Note>
         <div className="auth-actions">
           <button className="btn btn-primary" disabled={busy}>

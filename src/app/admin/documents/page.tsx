@@ -1,2 +1,2 @@
-import { AdminSettingsPage } from "@/components/admin-pages";
-export default function Page() { return <AdminSettingsPage />; }
+import { LiveAdminDocumentsPage } from "@/components/live-pages";
+export default function Page() { return <LiveAdminDocumentsPage />; }

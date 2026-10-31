@@ -1,2 +1,2 @@
-import { NewReportPage } from "@/components/user-pages";
-export default function Page() { return <NewReportPage />; }
+import { LiveNewReportPage } from "@/components/live-pages";
+export default function Page() { return <LiveNewReportPage />; }

@@ -49,7 +49,7 @@ export default function Home() {
               <HeartHandshake className="big" aria-hidden />
               <h3>Satu langkah, satu pilihan.</h3>
               <p>Kamu menentukan kapan memulai dan informasi apa yang ingin dibagikan.</p>
-              <span className="chip">Demo • data ilustrasi</span>
+              <span className="chip">Layanan pengaduan</span>
             </aside>
           </section>
 
@@ -87,7 +87,7 @@ export default function Home() {
 
       <footer className="pub-footer">
         <div className="pub-wrap pub-footer-in">
-          <div><Logo size={19} /><small>Demo layanan • bukan layanan darurat.</small></div>
+          <div><Logo size={19} /><small>SISKA • bukan layanan darurat.</small></div>
           <div>
             <h4>Kontak &amp; bantuan</h4>
             <p>Chat dengan Admin setelah login • Kontak resmi akan ditambahkan oleh institusi.</p>

@@ -1,2 +1,2 @@
-import { AdminChatPage } from "@/components/admin-pages";
-export default function Page() { return <AdminChatPage />; }
+import { LiveAdminChatPage } from "@/components/live-pages";
+export default function Page() { return <LiveAdminChatPage />; }

@@ -66,7 +66,20 @@ export class SiskaApiClientError extends Error {
  * Tidak pernah membaca atau menyimpan token di `localStorage` / `sessionStorage` (docs/07-FRONTEND-ARCHITECTURE.md §6).
  */
 async function getActiveBearerToken(forceRefresh = false): Promise<string> {
-  const currentUser = auth?.currentUser;
+  if (!auth) {
+    throw new SiskaApiClientError({
+      status: 401,
+      code: 'UNAUTHENTICATED',
+      message: 'Layanan autentikasi belum siap. Silakan muat ulang halaman.',
+      requestId: 'client_auth_unavailable',
+    });
+  }
+
+  // Firebase memulihkan sesi persisten secara asynchronous saat aplikasi dibuka.
+  // Jangan membaca currentUser sebelum proses pemulihan awal ini selesai.
+  await auth.authStateReady();
+
+  const currentUser = auth.currentUser;
   if (!currentUser) {
     throw new SiskaApiClientError({
       status: 401,

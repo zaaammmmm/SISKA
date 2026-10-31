@@ -1,2 +1,2 @@
-import { UserDashboard } from "@/components/user-pages";
-export default function Page() { return <UserDashboard />; }
+import { LiveUserDashboard } from "@/components/live-pages";
+export default function Page() { return <LiveUserDashboard />; }

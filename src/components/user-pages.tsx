@@ -10,14 +10,14 @@ import {
 import { signOut, updateProfile, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "firebase/auth";
 import { AppShell } from "@/components/shell";
 import { AiChatPanel } from "@/components/ai-chat";
-import { ChatWorkspace, type Msg } from "@/components/chat";
+import { ChatWorkspace } from "@/components/chat";
 import { IncidentCard, PrivacyNote } from "@/components/report-parts";
 import {
   FileItem, Modal, Note, PageHead, PasswordField, Pagination, ReportsTable, SelectField, StatusPill, Stepper, TextField,
   Toast, fileMeta,
 } from "@/components/ui";
 import { auth } from "@/lib/firebase";
-import { eduItems, findReport, SAMPLE_FILES, timeline, userConversations, userReports, type Status } from "@/lib/demo-data";
+import { eduItems, findReport, SAMPLE_FILES, timeline, userReports, type Status } from "@/lib/demo-data";
 import { useCurrentUser } from "@/lib/use-current-user";
 
 /* =============================== Dashboard =============================== */
@@ -301,32 +301,24 @@ function ModeCards({ active }: { active: "admin" | "ai" }) {
   );
 }
 
-const adminThread: Msg[] = [
-  { id: "m1", from: "me", author: "Kamu", time: "10.20", text: "Halo, saya ingin mengetahui langkah setelah membuat laporan." },
-  { id: "m2", from: "them", author: "Petugas SISKA • A", time: "10.24", text: "Halo, terima kasih sudah menghubungi SISKA. Kamu dapat melihat tahapan di Detail Laporan. Jika nyaman, kita bisa membahas pilihan dukungan yang ingin kamu ketahui." },
-];
-
 export function UserChatPage() {
-  const [hasAtt, setHasAtt] = useState(false);
   return (
     <AppShell role="user">
       <PageHead title="Chat dengan Admin" subtitle={hasAtt ? "Contoh pemilihan lampiran • file belum dikirim." : "Percakapan dengan petugas manusia, terpisah dari SISKA AI."} />
       <ModeCards active="admin" />
       <ChatWorkspace
-        conversations={userConversations}
-        initialThread={adminThread}
-        header={{ icon: Headset, title: "Petugas SISKA • A", subtitle: "Petugas manusia • ketersediaan contoh: sedang bertugas", chip: <span className="chip chip-teal">Chat langsung</span> }}
-        dateLabel="15 Oktober 2026 • Riwayat percakapan ilustrasi"
+        liveRole="reporter"
+        conversations={[]}
+        initialThread={[]}
+        header={{ icon: Headset, title: "Petugas SISKA", subtitle: "Percakapan langsung dengan petugas", chip: <span className="chip chip-teal">Real-time</span> }}
+        dateLabel="Percakapan langsung"
         meLabel="Kamu"
         placeholder="Tulis pesan untuk petugas..."
-        helper="Bagikan seperlunya. Demo ini tidak benar-benar mengirim pesan."
-        attachHelper="Bagikan hanya yang kamu nyaman sampaikan. Lampiran ini hanya contoh."
-        onAttachmentChange={setHasAtt}
+        helper="Pesan dikirim dengan aman dan diterima otomatis oleh petugas."
+        allowAttach={false}
       />
       <div style={{ marginTop: 19 }}>
-        {hasAtt
-          ? <Note>Periksa lampiran sebelum membagikan. Hapus dengan ikon × atau pilih Batal jika belum nyaman. Tidak ada file yang diunggah pada demo ini.</Note>
-          : <Note>Privasi: sampaikan hanya informasi yang diperlukan. Ketersediaan petugas dan pesan di atas adalah contoh; demo ini tidak mengirim pesan.</Note>}
+        <Note>Privasi: sampaikan hanya informasi yang diperlukan. Pesan percakapan hanya dapat dibaca oleh peserta yang berwenang.</Note>
       </div>
     </AppShell>
   );
