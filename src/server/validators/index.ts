@@ -4,4 +4,6 @@ export * from '@/server/validators/evidence.validator';
 export * from '@/server/validators/conversation.validator';
 export * from '@/server/validators/ai.validator';
 export * from '@/server/validators/profile.validator';
+export * from '@/server/validators/education.validator';
+export * from '@/server/validators/notification.validator';
 

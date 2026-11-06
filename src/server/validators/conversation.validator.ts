@@ -1,11 +1,3 @@
-/**
- * SISKA — Conversation & Message Input Validators
- * Sumber otoritas:
- * - docs/04-API-SPEC.yaml (/conversations, /conversations/{conversationId}/messages)
- * - docs/05-BACKEND-ARCHITECTURE.md §4.3 ("jangan menerima reporterId, role, atau senderId sebagai otoritas dari client")
- * - docs/09-TEST-PLAN.md CHAT-01, CHAT-03
- */
-
 import { ApiError } from '@/server/errors/api-error';
 import {
   assertAllowlistedKeys,
@@ -24,11 +16,7 @@ export interface SendMessageInput {
 
 const CREATE_CONVERSATION_ALLOWED_KEYS = ['reportId'] as const;
 
-/**
- * Validasi body `POST /api/v1/conversations`:
- * - `reportId`: string opsional (jika dikaitkan dengan laporan tertentu milik pelapor)
- * Menolak `reporterId` atau `assignedAdminId` dari client.
- */
+// Validasi Input Pembuatan Percakapan
 export function validateCreateConversationInput(
   payload: Record<string, unknown>,
 ): CreateConversationInput {
@@ -53,11 +41,7 @@ export function validateCreateConversationInput(
 
 const SEND_MESSAGE_ALLOWED_KEYS = ['body'] as const;
 
-/**
- * Validasi body `POST /api/v1/conversations/{conversationId}/messages` sesuai docs/04-API-SPEC.yaml:
- * - `body`: string [1..10000] (wajib)
- * Menolak `senderUid` dari client (pengirim wajib diturunkan dari token terverifikasi).
- */
+// Validasi Input Pengiriman Pesan
 export function validateSendMessageInput(
   payload: Record<string, unknown>,
 ): SendMessageInput {
@@ -78,9 +62,7 @@ export interface UpdateConversationAdminInput {
   status?: 'open' | 'closed';
 }
 
-/**
- * Validasi opsional untuk admin saat mengambil alih atau menutup percakapan.
- */
+// Validasi Pembaruan Percakapan Admin
 export function validateUpdateConversationAdminInput(
   payload: Record<string, unknown>,
 ): UpdateConversationAdminInput {

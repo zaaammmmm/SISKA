@@ -105,3 +105,24 @@ export async function verifyBearerToken(request: Request): Promise<Authenticated
   };
 }
 
+/**
+ * Mencoba memverifikasi Bearer Token bila ada.
+ * Jika tidak ada token atau format tidak valid, mengembalikan `null` tanpa melempar ApiError.unauthenticated.
+ * Digunakan untuk endpoint publik yang memiliki hak istimewa tambahan bagi pengguna/admin yang login.
+ */
+export async function tryVerifyBearerToken(
+  request: Request,
+): Promise<AuthenticatedCaller | null> {
+  const authHeader =
+    request.headers.get('authorization') || request.headers.get('Authorization');
+  if (!authHeader) {
+    return null;
+  }
+  try {
+    return await verifyBearerToken(request);
+  } catch {
+    return null;
+  }
+}
+
+

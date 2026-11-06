@@ -1,9 +1,3 @@
-/**
- * SISKA — Admin Knowledge Base Reindex Route Handler
- * (`/api/v1/admin/knowledge-documents/reindex`)
- * Sumber otoritas: docs/04-API-SPEC.yaml (/admin/knowledge-documents/reindex POST)
- */
-
 import { withAuthenticatedRoute } from '@/server/authz/route-handler';
 import { jsonSuccess } from '@/server/errors/api-error';
 import {
@@ -12,11 +6,7 @@ import {
 } from '@/server/rate-limit/limiter';
 import { requestKnowledgeReindex } from '@/server/services/knowledge.service';
 
-/**
- * `POST /api/v1/admin/knowledge-documents/reindex`
- * Menjadwalkan pengindeksan ulang dokumen Knowledge Base yang disetujui (khusus Admin).
- * Mengembalikan `202 Accepted` sesuai docs/04-API-SPEC.yaml.
- */
+// POST /api/v1/admin/knowledge-documents/reindex
 export const POST = withAuthenticatedRoute(
   async ({ requestId, caller }) => {
     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.ADMIN_MUTATION);
@@ -25,4 +15,3 @@ export const POST = withAuthenticatedRoute(
   },
   { adminOnly: true },
 );
-

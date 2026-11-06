@@ -13,8 +13,12 @@
 import type {
   AuditEventDocument,
   ConversationStatus,
+  EducationCategory,
+  EducationIcon,
   EvidenceContentType,
   KBDocumentStatus,
+  NotificationTargetType,
+  NotificationType,
   ReportStatus,
   UserRole,
 } from '@/types/domain';
@@ -237,3 +241,57 @@ export interface SerializedAuditEvent {
 }
 
 export type PaginatedAuditEventsResult = PaginatedResponse<SerializedAuditEvent>;
+
+/* ========================================================================== */
+/* 8. Education Materials DTOs (`/api/v1/education`, `/api/v1/admin/education`) */
+/* ========================================================================== */
+
+export interface SerializedEducationItem {
+  id: string;
+  slug: string;
+  title: string;
+  tag: string;
+  category: EducationCategory;
+  icon: EducationIcon;
+  excerpt: string;
+  content: string;
+  readingTimeMinutes: number;
+  isPublished: boolean;
+  sortOrder: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PaginatedEducationResult = PaginatedResponse<SerializedEducationItem>;
+
+/* ========================================================================== */
+/* 9. In-App Notifications DTOs (`/api/v1/notifications`, `/api/v1/admin/notifications`) */
+/* ========================================================================== */
+
+export interface SerializedNotificationItem {
+  id: string;
+  recipientUid: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  targetType: NotificationTargetType;
+  targetId: string | null;
+  isRead: boolean;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export type PaginatedNotificationsResult =
+  PaginatedResponse<SerializedNotificationItem>;
+
+export interface UnreadNotificationCountResult {
+  unreadCount: number;
+}
+
+export interface BroadcastNotificationResult {
+  sentCount: number;
+  targetRole: string;
+  requestId: string;
+}
+

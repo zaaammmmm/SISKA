@@ -302,6 +302,35 @@ export async function updateReportStatus(
       occurredAt: now,
     });
 
+    // Otomatis kirim In-App Notification ke reporter terkait perubahan status
+    if (currentData.reporterId) {
+      const notifRef = db
+        .collection('users')
+        .doc(currentData.reporterId)
+        .collection('notifications')
+        .doc();
+
+      const STATUS_LABELS: Record<ReportStatus, string> = {
+        submitted: 'Menunggu tinjauan',
+        under_review: 'Dalam peninjauan',
+        in_progress: 'Dalam proses',
+        resolved: 'Selesai',
+        rejected: 'Ditolak',
+      };
+
+      tx.set(notifRef, {
+        recipientUid: currentData.reporterId,
+        type: 'report_status_changed',
+        title: 'Status Laporan Diperbarui',
+        body: `Status laporan Anda telah diperbarui menjadi '${STATUS_LABELS[toStatus]}'.`,
+        targetType: 'report',
+        targetId: reportId,
+        isRead: false,
+        readAt: null,
+        createdAt: now,
+      });
+    }
+
     return serializeReportDoc(reportId, {
       ...currentData,
       status: toStatus,

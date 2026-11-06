@@ -1,11 +1,3 @@
-/**
- * SISKA — Report & Status Transition Validators
- * Sumber otoritas:
- * - docs/04-API-SPEC.yaml (/reports, /reports/{reportId})
- * - docs/01-SRS.md FR-006, FR-009, §7 (Aturan bisnis dan status)
- * - docs/09-TEST-PLAN.md REP-01, REP-02, REP-05, REP-06
- */
-
 import { ApiError } from '@/server/errors/api-error';
 import {
   ALLOWED_STATUS_TRANSITIONS,
@@ -38,6 +30,7 @@ export interface UpdateReportStatusInput {
   note: string | null;
 }
 
+// Type Guard Status Laporan
 export function isReportStatus(value: unknown): value is ReportStatus {
   return (
     typeof value === 'string' &&
@@ -45,9 +38,7 @@ export function isReportStatus(value: unknown): value is ReportStatus {
   );
 }
 
-/**
- * Validasi query parameter `GET /api/v1/reports` (cursor, limit, status).
- */
+// Validasi Query Daftar Laporan
 export function validateListReportsQuery(
   searchParams: URLSearchParams,
 ): ListReportsQuery {
@@ -77,14 +68,7 @@ const CREATE_REPORT_ALLOWED_KEYS = [
   'description',
 ] as const;
 
-/**
- * Validasi body `POST /api/v1/reports` sesuai docs/04-API-SPEC.yaml:
- * - `category`: string [1..100] (wajib)
- * - `incidentAt`: string ISO date-time | null (opsional)
- * - `location`: string [..500] | null (opsional)
- * - `description`: string [1..20000] (wajib)
- * Menolak field `reporterId` atau `status` dari client.
- */
+// Validasi Input Pembuatan Laporan
 export function validateCreateReportInput(
   payload: Record<string, unknown>,
 ): CreateReportInput {
@@ -116,11 +100,7 @@ export function validateCreateReportInput(
 
 const UPDATE_REPORT_STATUS_ALLOWED_KEYS = ['status', 'note'] as const;
 
-/**
- * Validasi body `PATCH /api/v1/reports/{reportId}` (atau `/status`) sesuai docs/04-API-SPEC.yaml:
- * - `status`: ReportStatus (wajib)
- * - `note`: string [..2000] (opsional secara sintaks, tetapi wajib untuk transisi tertentu di SRS §7)
- */
+// Validasi Input Pembaruan Status
 export function validateUpdateReportStatusInput(
   payload: Record<string, unknown>,
 ): UpdateReportStatusInput {
@@ -145,11 +125,7 @@ export function validateUpdateReportStatusInput(
   };
 }
 
-/**
- * Memvalidasi aturan bisnis transisi status laporan (docs/01-SRS.md §7 & seed-data.mjs).
- * - Melempar `409 CONFLICT` jika transisi dari `fromStatus` ke `toStatus` tidak diizinkan (REP-06).
- * - Melempar `400 VALIDATION_ERROR` (beserta `fields.note`) jika transisi mewajibkan alasan/catatan (`note`) namun kosong.
- */
+// Validasi Aturan Transisi Status
 export function assertValidStatusTransition(
   fromStatus: ReportStatus,
   toStatus: ReportStatus,

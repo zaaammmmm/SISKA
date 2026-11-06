@@ -11,6 +11,8 @@ export * as KnowledgeBaseService from '@/server/services/knowledge.service';
 export * as AiGatewayService from '@/server/services/ai.service';
 export * as AuditService from '@/server/services/audit.service';
 export * as ProfileService from '@/server/services/profile.service';
+export * as EducationService from '@/server/services/education.service';
+export * as NotificationService from '@/server/services/notification.service';
 
 export {
   createReport,
@@ -62,4 +64,22 @@ export {
   recordAuditEventInBatch,
   listAuditEvents,
 } from '@/server/services/audit.service';
+
+export {
+  listEducationMaterials,
+  getEducationDetail,
+  createEducationMaterial,
+  updateEducationMaterial,
+  deleteEducationMaterial,
+} from '@/server/services/education.service';
+
+export {
+  createNotification,
+  listUserNotifications,
+  getUnreadNotificationCount,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  broadcastNotificationByAdmin,
+} from '@/server/services/notification.service';
+
 

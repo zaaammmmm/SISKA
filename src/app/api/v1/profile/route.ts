@@ -1,8 +1,3 @@
-/**
- * SISKA — Current User Profile Route Handler (`/api/v1/profile`)
- * Sumber otoritas: docs/04-API-SPEC.yaml (/profile GET & PATCH), docs/09-TEST-PLAN.md AUTH-01, AUTH-04
- */
-
 import {
   withAuthenticatedRoute,
   withVerifiedTokenRoute,
@@ -18,10 +13,7 @@ import {
   validateUpdateProfileInput,
 } from '@/server/validators';
 
-/**
- * `GET /api/v1/profile`
- * Mengambil profil pengguna aktif yang sedang login (wajib memiliki role sah).
- */
+// GET /api/v1/profile
 export const GET = withAuthenticatedRoute(
   async ({ requestId, caller }) => {
     const profile = await getMyProfile(caller);
@@ -30,12 +22,7 @@ export const GET = withAuthenticatedRoute(
   { roles: ['reporter', 'admin'] },
 );
 
-/**
- * `PATCH /api/v1/profile`
- * Memperbarui field profil yang diizinkan (`displayName`) untuk pengguna berwenang (`reporter` / `admin`).
- * Menolak akun tanpa peran (mis. `seed_outsider`) secara murni melalui RBAC (`withAuthenticatedRoute`),
- * serta menolak setiap usaha menyisipkan `role` pada body (AUTH-04).
- */
+// PATCH /api/v1/profile
 export const PATCH = withAuthenticatedRoute(
   async ({ request, requestId, caller }) => {
     const rawBody = await parseJsonObject(request);
@@ -46,11 +33,7 @@ export const PATCH = withAuthenticatedRoute(
   { roles: ['reporter', 'admin'] },
 );
 
-/**
- * `POST /api/v1/profile`
- * Inisialisasi satu kali dokumen profil `users/{uid}` dengan `role: 'reporter'`
- * setelah pengguna menyelesaikan registrasi di Firebase Auth (FR-002 / AUTH-01).
- */
+// POST /api/v1/profile
 export const POST = withVerifiedTokenRoute(
   async ({ request, requestId, caller }) => {
     const rawBody = await parseJsonObject(request);

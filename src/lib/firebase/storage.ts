@@ -1,18 +1,7 @@
-/**
- * SISKA — Server-Side Cloud Storage Path Builders & Object Helpers
- * Sumber otoritas:
- * - docs/05-BACKEND-ARCHITECTURE.md §3 (`src/lib/firebase/storage.ts`), §4, §5
- * - docs/08-AUTHORIZATION-MATRIX.md (`reports/{reportId}/evidence/{evidenceId}`, `knowledge/{documentId}/original.pdf`)
- * - storage.rules
- */
-
 import { getAdminStorage } from '@/lib/firebase/admin';
 import { EVIDENCE_SIGNED_URL_EXPIRES_SECONDS } from '@/types/domain';
 
-/**
- * Membangun path objek bukti laporan yang terikat pada `reportId` dan `evidenceId`.
- * Path dihasilkan murni di sisi server (`docs/05-BACKEND-ARCHITECTURE.md` §4).
- */
+// Path Objek Bukti
 export function buildEvidenceObjectPath(
   reportId: string,
   evidenceId: string,
@@ -22,26 +11,19 @@ export function buildEvidenceObjectPath(
   return `reports/${reportId}/evidence/${evidenceId}${cleanExt}`;
 }
 
-/**
- * Membangun path objek dokumen PDF Knowledge Base di Cloud Storage.
- */
+// Path Objek Knowledge Base
 export function buildKnowledgeObjectPath(documentId: string): string {
   return `knowledge/${documentId}/original.pdf`;
 }
 
-/**
- * Memeriksa apakah objek benar-benar sudah ada di Cloud Storage (mencegah orphan metadata).
- */
+// Verifikasi Keberadaan Objek Storage
 export async function storageObjectExists(objectPath: string): Promise<boolean> {
   const bucket = getAdminStorage().bucket();
   const [exists] = await bucket.file(objectPath).exists();
   return Boolean(exists);
 }
 
-/**
- * Membuat Signed URL berbatas waktu (maksimal 5 menit / 300 detik sesuai NFR-SEC-04)
- * untuk pengunduhan berkas bukti privat setelah otorisasi terverifikasi.
- */
+// Signed URL Unduhan Bukti
 export async function createSignedEvidenceDownloadUrl(
   objectPath: string,
   expiresInSeconds: number = EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,

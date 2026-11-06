@@ -139,10 +139,66 @@ export interface KnowledgeChunkDocument {
   createdAt: Date | string;
 }
 
+export const EDUCATION_CATEGORIES = ['general', 'guide'] as const;
+export type EducationCategory = (typeof EDUCATION_CATEGORIES)[number];
+
+export const EDUCATION_ICONS = ['heart', 'alert', 'users', 'shield'] as const;
+export type EducationIcon = (typeof EDUCATION_ICONS)[number];
+
+export interface EducationDocument {
+  slug: string;
+  title: string;
+  tag: string;
+  category: EducationCategory;
+  icon: EducationIcon;
+  excerpt: string;
+  content: string;
+  readingTimeMinutes: number;
+  isPublished: boolean;
+  sortOrder: number;
+  createdBy: string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+export const NOTIFICATION_TYPES = [
+  'report_status_changed',
+  'new_chat_message',
+  'system_announcement',
+] as const;
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+export const NOTIFICATION_TARGET_TYPES = [
+  'report',
+  'conversation',
+  'education',
+  'none',
+] as const;
+export type NotificationTargetType = (typeof NOTIFICATION_TARGET_TYPES)[number];
+
+export interface NotificationDocument {
+  recipientUid: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  targetType: NotificationTargetType;
+  targetId: string | null;
+  isRead: boolean;
+  readAt: Date | string | null;
+  createdAt: Date | string;
+}
+
 export interface AuditEventDocument {
   actorUid: string;
   action: string;
-  targetType: 'user' | 'report' | 'evidence' | 'conversation' | 'knowledgeDocument';
+  targetType:
+    | 'user'
+    | 'report'
+    | 'evidence'
+    | 'conversation'
+    | 'knowledgeDocument'
+    | 'education'
+    | 'notification';
   targetId: string;
   occurredAt: Date | string;
   requestId: string;

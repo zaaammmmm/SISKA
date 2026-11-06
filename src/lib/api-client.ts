@@ -12,23 +12,29 @@ import type {
   ApiErrorBody,
   ApiErrorCode,
   ApiErrorFieldMap,
+  BroadcastNotificationResult,
   CreateEvidenceResult,
   KnowledgeReindexResult,
   PaginatedAuditEventsResult,
   PaginatedConversationsResult,
+  PaginatedEducationResult,
   PaginatedKnowledgeDocumentsResult,
   PaginatedMessagesResult,
+  PaginatedNotificationsResult,
   PaginatedResponse,
   PaginatedReportsResult,
   ReportsSummaryResult,
   SerializedAiRagDocument,
   SerializedConversation,
+  SerializedEducationItem,
   SerializedKnowledgeDocument,
   SerializedMessage,
+  SerializedNotificationItem,
   SerializedReport,
   SerializedReportDetail,
   SerializedUserProfile,
   SignedDownloadUrlResult,
+  UnreadNotificationCountResult,
 } from '@/types/api';
 import type {
   ConversationStatus,
@@ -522,6 +528,160 @@ export async function fetchBackendHealth(): Promise<BackendHealthStatus> {
   return json;
 }
 
+// ── 8. Public Education Materials & Admin Content Management ───────────────
+
+export async function fetchEducationList(params?: {
+  category?: 'all' | 'guide' | 'general';
+  tag?: string;
+  search?: string;
+  cursor?: string;
+  limit?: number;
+}): Promise<PaginatedEducationResult> {
+  const q = new URLSearchParams();
+  if (params?.category) q.set('category', params.category);
+  if (params?.tag) q.set('tag', params.tag);
+  if (params?.search) q.set('search', params.search);
+  if (params?.cursor) q.set('cursor', params.cursor);
+  if (params?.limit) q.set('limit', String(params.limit));
+
+  const qs = q.toString();
+  return apiRequest<PaginatedEducationResult>(
+    `/api/v1/education${qs ? `?${qs}` : ''}`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
+export async function fetchEducationDetail(
+  idOrSlug: string,
+): Promise<SerializedEducationItem> {
+  return apiRequest<SerializedEducationItem>(
+    `/api/v1/education/${encodeURIComponent(idOrSlug)}`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
+export async function createEducationByAdmin(input: {
+  title: string;
+  slug?: string | null;
+  tag: string;
+  category: 'general' | 'guide';
+  icon: 'heart' | 'alert' | 'users' | 'shield';
+  excerpt: string;
+  content: string;
+  readingTimeMinutes?: number;
+  isPublished?: boolean;
+  sortOrder?: number;
+}): Promise<SerializedEducationItem> {
+  return apiRequest<SerializedEducationItem>('/api/v1/admin/education', {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export async function updateEducationByAdmin(
+  id: string,
+  input: {
+    title?: string;
+    slug?: string | null;
+    tag?: string;
+    category?: 'general' | 'guide';
+    icon?: 'heart' | 'alert' | 'users' | 'shield';
+    excerpt?: string;
+    content?: string;
+    readingTimeMinutes?: number;
+    isPublished?: boolean;
+    sortOrder?: number;
+  },
+): Promise<SerializedEducationItem> {
+  return apiRequest<SerializedEducationItem>(
+    `/api/v1/admin/education/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      body: input,
+    },
+  );
+}
+
+export async function deleteEducationByAdmin(
+  id: string,
+): Promise<{ id: string; deleted: boolean }> {
+  return apiRequest<{ id: string; deleted: boolean }>(
+    `/api/v1/admin/education/${encodeURIComponent(id)}`,
+    {
+      method: 'DELETE',
+    },
+  );
+}
+
+// ── 9. In-App Notifications & Admin Broadcast ──────────────────────────────
+
+export async function fetchNotifications(params?: {
+  unreadOnly?: boolean;
+  cursor?: string;
+  limit?: number;
+}): Promise<PaginatedNotificationsResult> {
+  const q = new URLSearchParams();
+  if (params?.unreadOnly) q.set('unreadOnly', 'true');
+  if (params?.cursor) q.set('cursor', params.cursor);
+  if (params?.limit) q.set('limit', String(params.limit));
+
+  const qs = q.toString();
+  return apiRequest<PaginatedNotificationsResult>(
+    `/api/v1/notifications${qs ? `?${qs}` : ''}`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
+export async function fetchUnreadNotificationCount(): Promise<UnreadNotificationCountResult> {
+  return apiRequest<UnreadNotificationCountResult>(
+    '/api/v1/notifications/unread-count',
+    {
+      method: 'GET',
+    },
+  );
+}
+
+export async function markNotificationAsRead(
+  id: string,
+): Promise<SerializedNotificationItem> {
+  return apiRequest<SerializedNotificationItem>(
+    `/api/v1/notifications/${encodeURIComponent(id)}/read`,
+    {
+      method: 'PATCH',
+    },
+  );
+}
+
+export async function markAllNotificationsAsRead(): Promise<{
+  markedCount: number;
+}> {
+  return apiRequest<{ markedCount: number }>('/api/v1/notifications/read-all', {
+    method: 'PATCH',
+  });
+}
+
+export async function broadcastNotificationByAdmin(input: {
+  title: string;
+  body: string;
+  targetType?: 'report' | 'conversation' | 'education' | 'none';
+  targetId?: string | null;
+  targetRole?: 'reporter' | 'all';
+}): Promise<BroadcastNotificationResult> {
+  return apiRequest<BroadcastNotificationResult>(
+    '/api/v1/admin/notifications/broadcast',
+    {
+      method: 'POST',
+      body: input,
+    },
+  );
+}
+
 /**
  * Objek SDK terstruktur (`siskaApi`) untuk memudahkan eksplorasi endpoint
  * melalui autocomplete oleh Tim Frontend dan Tim AI.
@@ -554,6 +714,20 @@ export const siskaApi = {
     updateByAdmin: updateConversationStatusByAdmin,
     listMessages: fetchConversationMessages,
     sendMessage: postConversationMessage,
+  },
+  education: {
+    list: fetchEducationList,
+    detail: fetchEducationDetail,
+    create: createEducationByAdmin,
+    update: updateEducationByAdmin,
+    delete: deleteEducationByAdmin,
+  },
+  notifications: {
+    list: fetchNotifications,
+    unreadCount: fetchUnreadNotificationCount,
+    markRead: markNotificationAsRead,
+    markAllRead: markAllNotificationsAsRead,
+    broadcast: broadcastNotificationByAdmin,
   },
   ai: {
     ask: askSiskaAiQuestion,

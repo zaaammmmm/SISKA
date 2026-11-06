@@ -1,7 +1,3 @@
-/**
- * SISKA AI Service RAG document management for authenticated admins.
- */
-
 import { withAuthenticatedRoute } from '@/server/authz/route-handler';
 import { jsonSuccess } from '@/server/errors/api-error';
 import {
@@ -40,6 +36,7 @@ function validateFileName(value: unknown): string {
   return file;
 }
 
+// GET /api/v1/admin/ai-documents
 export const GET = withAuthenticatedRoute(
   async ({ requestId }) => {
     const docs = await listRemoteAiRagDocuments(requestId);
@@ -51,6 +48,7 @@ export const GET = withAuthenticatedRoute(
   { adminOnly: true },
 );
 
+// POST /api/v1/admin/ai-documents
 export const POST = withAuthenticatedRoute(
   async ({ request, requestId, caller }) => {
     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.ADMIN_MUTATION);
@@ -94,6 +92,7 @@ export const POST = withAuthenticatedRoute(
   { adminOnly: true },
 );
 
+// DELETE /api/v1/admin/ai-documents
 export const DELETE = withAuthenticatedRoute(
   async ({ request, requestId, caller }) => {
     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.ADMIN_MUTATION);

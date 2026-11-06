@@ -1,11 +1,3 @@
-/**
- * SISKA — Evidence Upload & File Signature Validators
- * Sumber otoritas:
- * - docs/04-API-SPEC.yaml (/reports/{reportId}/evidence)
- * - docs/05-BACKEND-ARCHITECTURE.md §5 (MIME allowlist, 5 MiB limit, signature inspection)
- * - docs/09-TEST-PLAN.md FILE-01, FILE-02
- */
-
 import { ApiError } from '@/server/errors/api-error';
 import {
   ALLOWED_EVIDENCE_CONTENT_TYPES,
@@ -23,9 +15,7 @@ export interface CreateEvidenceInput {
   contentType: EvidenceContentType;
   sizeBytes: number;
   sha256?: string;
-  /** Opsional: isi berkas dalam base64 untuk unggahan JSON satu langkah */
   contentBase64?: string;
-  /** Opsional: ID bukti saat melakukan finalisasi setelah unggah ke Signed URL */
   evidenceId?: string;
 }
 
@@ -38,6 +28,7 @@ const CREATE_EVIDENCE_ALLOWED_KEYS = [
   'evidenceId',
 ] as const;
 
+// Type Guard Content Type Bukti
 export function isEvidenceContentType(
   value: unknown,
 ): value is EvidenceContentType {
@@ -47,9 +38,7 @@ export function isEvidenceContentType(
   );
 }
 
-/**
- * Mengembalikan ekstensi file kanonis berdasarkan MIME type yang telah tervalidasi.
- */
+// Ekstensi File Bukti
 export function extensionForEvidenceType(
   contentType: EvidenceContentType,
 ): 'pdf' | 'jpg' | 'png' {
@@ -63,15 +52,7 @@ export function extensionForEvidenceType(
   }
 }
 
-/**
- * Validasi metadata unggahan bukti (`POST /api/v1/reports/{reportId}/evidence`):
- * - `fileName`: string [1..255], dibersihkan dari komponen path
- * - `contentType`: 'application/pdf' | 'image/jpeg' | 'image/png'
- * - `sizeBytes`: integer [1..5242880] (5 MiB)
- * - `sha256`: hex 64 karakter (opsional)
- * - `contentBase64`: base64 payload (opsional)
- * - `evidenceId`: ID bukti untuk komit/finalisasi Signed Upload (opsional)
- */
+// Validasi Input Bukti
 export function validateCreateEvidenceInput(
   payload: Record<string, unknown>,
 ): CreateEvidenceInput {
@@ -86,7 +67,6 @@ export function validateCreateEvidenceInput(
     maxLength: 255,
   });
 
-  // Cegah upaya path traversal atau ekstensi executable ganda yang mencurigakan
   if (
     rawFileName.includes('..') ||
     rawFileName.includes('/') ||
@@ -161,10 +141,7 @@ export function validateCreateEvidenceInput(
   };
 }
 
-/**
- * Memeriksa kesesuaian Magic Bytes (signature biner awal berkas) terhadap `contentType` yang diklaim.
- * Mencegah serangan spoofed MIME (mis. executable diubah namanya menjadi .pdf atau .png — FILE-02).
- */
+// Validasi Magic Bytes Berkas
 export function assertValidFileSignature(
   bytes: Uint8Array,
   declaredType: EvidenceContentType,
@@ -175,7 +152,6 @@ export function assertValidFileSignature(
   }
 
   if (declaredType === 'application/pdf') {
-    // Signature PDF: %PDF- (0x25 0x50 0x44 0x46 0x2D)
     const isPdf =
       bytes[0] === 0x25 &&
       bytes[1] === 0x50 &&
@@ -190,7 +166,6 @@ export function assertValidFileSignature(
   }
 
   if (declaredType === 'image/png') {
-    // Signature PNG: 89 50 4E 47 0D 0A 1A 0A
     const isPng =
       bytes[0] === 0x89 &&
       bytes[1] === 0x50 &&
@@ -208,7 +183,6 @@ export function assertValidFileSignature(
   }
 
   if (declaredType === 'image/jpeg') {
-    // Signature JPEG: FF D8 FF
     const isJpeg =
       bytes[0] === 0xff &&
       bytes[1] === 0xd8 &&

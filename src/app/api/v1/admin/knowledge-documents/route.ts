@@ -1,8 +1,3 @@
-/**
- * SISKA — Admin Knowledge Base Documents Route Handler (`/api/v1/admin/knowledge-documents`)
- * Sumber otoritas: docs/04-API-SPEC.yaml (/admin/knowledge-documents GET & POST), docs/09-TEST-PLAN.md KB-01, KB-02
- */
-
 import { withAuthenticatedRoute } from '@/server/authz/route-handler';
 import { jsonSuccess } from '@/server/errors/api-error';
 import {
@@ -15,10 +10,7 @@ import {
 } from '@/server/services/knowledge.service';
 import { validateKnowledgePdfFormData } from '@/server/validators';
 
-/**
- * `GET /api/v1/admin/knowledge-documents`
- * Mengambil daftar dokumen Knowledge Base beserta status pengindeksan (khusus Admin — KB-02).
- */
+// GET /api/v1/admin/knowledge-documents
 export const GET = withAuthenticatedRoute(
   async ({ requestId, caller }) => {
     const result = await listKnowledgeDocuments(caller);
@@ -27,11 +19,7 @@ export const GET = withAuthenticatedRoute(
   { adminOnly: true },
 );
 
-/**
- * `POST /api/v1/admin/knowledge-documents`
- * Mengunggah berkas PDF resmi untuk diindeks ke Knowledge Base (khusus Admin — KB-01).
- * Mengembalikan `202 Accepted` sesuai docs/04-API-SPEC.yaml.
- */
+// POST /api/v1/admin/knowledge-documents
 export const POST = withAuthenticatedRoute(
   async ({ request, requestId, caller }) => {
     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.ADMIN_MUTATION);
@@ -42,4 +30,3 @@ export const POST = withAuthenticatedRoute(
   },
   { adminOnly: true },
 );
-

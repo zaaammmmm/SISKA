@@ -1,14 +1,8 @@
-/**
- * SISKA — Backend Readiness & Health Check Route Handler (`/api/v1/health`)
- * Sumber otoritas:
- * - docs/05-BACKEND-ARCHITECTURE.md §9 (Health check)
- * - docs/06-AI-ARCHITECTURE.md §3 (`GET /health`: readiness only; no secret/environment values in response)
- */
-
 import { NextRequest } from 'next/server';
 import { resolveAiServiceConfig } from '@/server/contracts/ai-service.contract';
 import { jsonSuccess, resolveRequestId } from '@/server/errors/api-error';
 
+// GET /api/v1/health
 export async function GET(request: NextRequest) {
   const requestId = resolveRequestId(request);
   const aiConfig = resolveAiServiceConfig();

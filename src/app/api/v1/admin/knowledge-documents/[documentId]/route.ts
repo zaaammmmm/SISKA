@@ -1,9 +1,3 @@
-/**
- * SISKA — Single Knowledge Base Document Route Handler
- * (`/api/v1/admin/knowledge-documents/[documentId]`)
- * Sumber otoritas: docs/04-API-SPEC.yaml (/admin/knowledge-documents/{documentId} DELETE), docs/09-TEST-PLAN.md KB-03
- */
-
 import { NextResponse } from 'next/server';
 import { withAuthenticatedRoute } from '@/server/authz/route-handler';
 import {
@@ -17,11 +11,7 @@ interface KnowledgeDocRouteParams {
   documentId: string;
 }
 
-/**
- * `DELETE /api/v1/admin/knowledge-documents/{documentId}`
- * Menghapus dokumen Knowledge Base, seluruh `knowledgeChunks` terkait, dan berkas PDF di Cloud Storage (KB-03).
- * Mengembalikan `204 No Content` sesuai docs/04-API-SPEC.yaml.
- */
+// DELETE /api/v1/admin/knowledge-documents/[documentId]
 export const DELETE = withAuthenticatedRoute<KnowledgeDocRouteParams>(
   async ({ requestId, caller, params }) => {
     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.ADMIN_MUTATION);
@@ -38,4 +28,3 @@ export const DELETE = withAuthenticatedRoute<KnowledgeDocRouteParams>(
   },
   { adminOnly: true },
 );
-

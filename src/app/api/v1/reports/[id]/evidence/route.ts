@@ -1,8 +1,3 @@
-/**
- * SISKA — Report Evidence Upload Route Handler (`/api/v1/reports/[id]/evidence`)
- * Sumber otoritas: docs/04-API-SPEC.yaml (/reports/{reportId}/evidence POST)
- */
-
 import { withAuthenticatedRoute } from '@/server/authz/route-handler';
 import { jsonSuccess } from '@/server/errors/api-error';
 import {
@@ -23,12 +18,7 @@ interface ReportEvidenceRouteParams {
   id: string;
 }
 
-/**
- * `POST /api/v1/reports/{reportId}/evidence`
- * Mendukung dua mode sesuai docs/04-API-SPEC.yaml & docs/05-BACKEND-ARCHITECTURE.md §4.6:
- * 1. `multipart/form-data`: mengunggah biner langsung dengan inspeksi Magic Bytes, SHA-256, dan kompensasi rollback.
- * 2. `application/json`: memvalidasi metadata (`fileName`, `contentType`, `sizeBytes`) dan mengeluarkan Signed Upload URL.
- */
+// POST /api/v1/reports/[id]/evidence
 export const POST = withAuthenticatedRoute<ReportEvidenceRouteParams>(
   async ({ request, requestId, caller, params }) => {
     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.UPLOAD_EVIDENCE);
@@ -58,4 +48,3 @@ export const POST = withAuthenticatedRoute<ReportEvidenceRouteParams>(
   },
   { roles: ['reporter'] },
 );
-

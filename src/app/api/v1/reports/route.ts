@@ -1,8 +1,3 @@
-/**
- * SISKA — Reports Collection Route Handler (`/api/v1/reports`)
- * Sumber otoritas: docs/04-API-SPEC.yaml (/reports GET & POST)
- */
-
 import { withAuthenticatedRoute } from '@/server/authz/route-handler';
 import { jsonSuccess } from '@/server/errors/api-error';
 import {
@@ -16,12 +11,7 @@ import {
   validateListReportsQuery,
 } from '@/server/validators';
 
-/**
- * `GET /api/v1/reports`
- * Mengambil daftar laporan berpaginasi.
- * - Reporter hanya menerima laporan miliknya sendiri.
- * - Admin menerima daftar laporan sesuai filter status.
- */
+// GET /api/v1/reports
 export const GET = withAuthenticatedRoute(
   async ({ request, requestId, caller }) => {
     const query = validateListReportsQuery(request.nextUrl.searchParams);
@@ -31,11 +21,7 @@ export const GET = withAuthenticatedRoute(
   { roles: ['reporter', 'admin'] },
 );
 
-/**
- * `POST /api/v1/reports`
- * Membuat laporan baru oleh pengguna terautentikasi (`reporter`).
- * Identitas `reporterId` diturunkan dari Firebase ID Token terverifikasi di server.
- */
+// POST /api/v1/reports
 export const POST = withAuthenticatedRoute(
   async ({ request, requestId, caller }) => {
     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.CREATE_REPORT);

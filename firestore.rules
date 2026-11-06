@@ -5,7 +5,6 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Otoritas utama role adalah Custom User Claim (`request.auth.token.role`) sesuai README.md & 05-BACKEND-ARCHITECTURE.md §5
     function isAdmin() {
       return signedIn() && request.auth.token.role == 'admin';
     }
@@ -36,7 +35,7 @@ service cloud.firestore {
       );
     }
 
-    // 1. users/{uid} (docs/02-ERD.md §4 & AUTH-01 / AUTH-04)
+    // users
     match /users/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
       allow create: if signedIn()
@@ -52,9 +51,17 @@ service cloud.firestore {
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'createdAt', 'updatedAt']);
       allow delete: if false;
+
+      // notifications
+      match /notifications/{notificationId} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow update: if signedIn() && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt']);
+        allow create, delete: if false;
+      }
     }
 
-    // 2. reports/{reportId} (docs/02-ERD.md §4 & REP-01..REP-06)
+    // reports
     match /reports/{reportId} {
       allow create: if isReporter()
         && request.resource.data.reporterId == request.auth.uid
@@ -70,23 +77,22 @@ service cloud.firestore {
           'description', 'status', 'createdAt', 'updatedAt', 'resolvedAt'
         ]);
       allow read: if signedIn() && (resource.data.reporterId == request.auth.uid || isAdmin());
-      // Perubahan status sensitif wajib melalui backend Admin SDK (transaksi status + statusHistory + auditEvents)
       allow update, delete: if false;
 
-      // 2a. Sub-koleksi evidence (FILE-01..FILE-03)
+      // evidence
       match /evidence/{evidenceId} {
         allow read: if isReportOwner(reportId) || isAdmin();
         allow create, update, delete: if false;
       }
 
-      // 2b. Sub-koleksi statusHistory (append-only oleh server tepercaya — docs/02-ERD.md §4)
+      // statusHistory
       match /statusHistory/{eventId} {
         allow read: if isReportOwner(reportId) || isAdmin();
         allow create, update, delete: if false;
       }
     }
 
-    // 3. conversations/{conversationId} & messages (CHAT-01..CHAT-03)
+    // conversations
     match /conversations/{conversationId} {
       allow read: if isConversationParticipant(resource.data);
       allow create: if isReporter()
@@ -98,6 +104,7 @@ service cloud.firestore {
         ]);
       allow update, delete: if false;
 
+      // messages
       match /messages/{messageId} {
         allow read: if isConversationParticipant(
           get(/databases/$(database)/documents/conversations/$(conversationId)).data
@@ -115,24 +122,31 @@ service cloud.firestore {
       }
     }
 
-    // 4. knowledgeDocuments & knowledgeChunks (KB-01..KB-03)
+    // knowledgeDocuments
     match /knowledgeDocuments/{documentId} {
       allow read: if isAdmin();
       allow write: if false;
     }
 
+    // knowledgeChunks
     match /knowledgeChunks/{chunkId} {
       allow read: if isAdmin();
       allow write: if false;
     }
 
-    // 5. auditEvents (docs/05-BACKEND-ARCHITECTURE.md §7 & PRIV-01: tidak dapat dibaca reporter & tidak dapat dimodifikasi client)
+    // auditEvents
     match /auditEvents/{eventId} {
       allow read: if isAdmin();
       allow write: if false;
     }
 
-    // Default-deny untuk seluruh koleksi lain
+    // education
+    match /education/{articleId} {
+      allow read: if resource.data.isPublished == true || isAdmin();
+      allow write: if false;
+    }
+
+    // default-deny
     match /{document=**} {
       allow read, write: if false;
     }

@@ -344,6 +344,31 @@ export async function sendMessage(
         : {}),
     });
 
+    // Otomatis kirim In-App Notification kepada lawan bicara di percakapan
+    const reporterId = resolveConversationReporterId(convData!);
+    const recipientUid =
+      authorized.role === 'reporter' ? assignedAdminId : reporterId;
+
+    if (recipientUid) {
+      const notifRef = db
+        .collection('users')
+        .doc(recipientUid)
+        .collection('notifications')
+        .doc();
+
+      tx.set(notifRef, {
+        recipientUid,
+        type: 'new_chat_message',
+        title: 'Pesan Baru Diterima',
+        body: 'Anda menerima pesan baru pada ruang percakapan SISKA.',
+        targetType: 'conversation',
+        targetId: conversationId,
+        isRead: false,
+        readAt: null,
+        createdAt: now,
+      });
+    }
+
     return serializeMessageDoc(msgRef.id, msgData);
   });
 

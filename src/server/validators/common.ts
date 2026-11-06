@@ -1,16 +1,6 @@
-/**
- * SISKA — Common Input Validation Primitives (Schema Allowlist & Sanitization)
- * Sumber otoritas:
- * - docs/05-BACKEND-ARCHITECTURE.md §4.3 ("Validasi request dengan schema allowlist; jangan menerima reporterId, role, atau senderId sebagai otoritas dari client.")
- * - docs/01-SRS.md NFR-SEC-03
- * - docs/09-TEST-PLAN.md AUTH-04, REP-02
- */
-
 import { ApiError } from '@/server/errors/api-error';
 
-/**
- * Daftar field otoritas server yang DILARANG KERAS dikirim oleh client pada body request.
- */
+// Field Otoritas Server Dilarang
 const FORBIDDEN_AUTHORITY_KEYS = new Set([
   'uid',
   'role',
@@ -24,10 +14,7 @@ const FORBIDDEN_AUTHORITY_KEYS = new Set([
   'resolvedAt',
 ]);
 
-/**
- * Membaca dan mem-parsing JSON body dari Request secara aman.
- * Memastikan hasil parsing berupa plain object (`Record<string, unknown>`).
- */
+// Parsing JSON Body
 export async function parseJsonObject(
   request: Request,
 ): Promise<Record<string, unknown>> {
@@ -45,11 +32,7 @@ export async function parseJsonObject(
   return parsed as Record<string, unknown>;
 }
 
-/**
- * Memvalidasi bahwa objek hanya memuat key yang ada di dalam `allowedKeys` (Schema Allowlist).
- * Menolak secara eksplisit jika ada usaha menyuntikkan field otoritas (`role`, `reporterId`, `senderUid`, dll.)
- * disertai rincian `fields` per-field.
- */
+// Validasi Schema Allowlist
 export function assertAllowlistedKeys(
   payload: Record<string, unknown>,
   allowedKeys: readonly string[],
@@ -69,10 +52,7 @@ export function assertAllowlistedKeys(
   }
 }
 
-/**
- * Memastikan string wajib ada, bertipe string, tidak berisi karakter null-byte,
- * serta memenuhi panjang minimum & maksimum setelah di-trim.
- */
+// Validasi String Wajib
 export function validateRequiredString(
   value: unknown,
   fieldName: string,
@@ -102,10 +82,7 @@ export function validateRequiredString(
   return trimmed;
 }
 
-/**
- * Memvalidasi string opsional (boleh `undefined` atau `null`).
- * Jika berupa string kosong setelah di-trim, dikembalikan sebagai `null`.
- */
+// Validasi String Opsional
 export function validateOptionalString(
   value: unknown,
   fieldName: string,
@@ -135,9 +112,7 @@ export function validateOptionalString(
   return trimmed;
 }
 
-/**
- * Memvalidasi tanggal ISO-8601 opsional (`date-time`) dan mengembalikannya sebagai objek `Date` atau `null`.
- */
+// Validasi Tanggal ISO
 export function validateOptionalIsoDate(
   value: unknown,
   fieldName: string,
@@ -159,9 +134,7 @@ export function validateOptionalIsoDate(
   return parsed;
 }
 
-/**
- * Memvalidasi ID dokumen Firestore pada parameter path/query agar bebas dari karakter traversal.
- */
+// Validasi Resource ID
 export function validateResourceId(
   value: unknown,
   fieldName = 'id',
@@ -183,10 +156,7 @@ export interface PaginationParams {
   limit: number;
 }
 
-/**
- * Memvalidasi parameter paginasi query (`cursor`, `limit`) sesuai docs/04-API-SPEC.yaml:
- * `limit`: integer minimum 1, maximum 50, default 20.
- */
+// Validasi Parameter Paginasi
 export function validatePaginationParams(
   searchParams: URLSearchParams,
   defaultLimit = 20,

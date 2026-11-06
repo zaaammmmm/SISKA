@@ -1,8 +1,3 @@
-/**
- * SISKA — Conversation Messages Route Handler (`/api/v1/conversations/[id]/messages`)
- * Sumber otoritas: docs/04-API-SPEC.yaml (/conversations/{conversationId}/messages GET & POST)
- */
-
 import { withAuthenticatedRoute } from '@/server/authz/route-handler';
 import { jsonSuccess } from '@/server/errors/api-error';
 import {
@@ -21,10 +16,7 @@ interface ConversationMessagesRouteParams {
   id: string;
 }
 
-/**
- * `GET /api/v1/conversations/{conversationId}/messages`
- * Mengambil daftar pesan untuk peserta percakapan yang berwenang (CHAT-01, CHAT-02).
- */
+// GET /api/v1/conversations/[id]/messages
 export const GET = withAuthenticatedRoute<ConversationMessagesRouteParams>(
   async ({ request, requestId, caller, params }) => {
     const conversationId = validateResourceId(params.id, 'conversationId');
@@ -35,10 +27,7 @@ export const GET = withAuthenticatedRoute<ConversationMessagesRouteParams>(
   { roles: ['reporter', 'admin'] },
 );
 
-/**
- * `POST /api/v1/conversations/{conversationId}/messages`
- * Mengirim pesan baru pada percakapan. `senderUid` diturunkan dari token terverifikasi.
- */
+// POST /api/v1/conversations/[id]/messages
 export const POST = withAuthenticatedRoute<ConversationMessagesRouteParams>(
   async ({ request, requestId, caller, params }) => {
     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.SEND_MESSAGE);
@@ -50,4 +39,3 @@ export const POST = withAuthenticatedRoute<ConversationMessagesRouteParams>(
   },
   { roles: ['reporter', 'admin'] },
 );
-

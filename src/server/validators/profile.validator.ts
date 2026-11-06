@@ -1,11 +1,3 @@
-/**
- * SISKA — User Profile Input Validators
- * Sumber otoritas:
- * - docs/04-API-SPEC.yaml (/profile)
- * - docs/01-SRS.md FR-014 ("pengguna mengelola field profil yang diperbolehkan, tanpa dapat mengubah role atau ID internal")
- * - docs/09-TEST-PLAN.md AUTH-04 ("Reporter attempts to set role=admin -> Server ignores/rejects; no privilege change")
- */
-
 import {
   assertAllowlistedKeys,
   validateRequiredString,
@@ -17,11 +9,7 @@ export interface UpdateProfileInput {
 
 const UPDATE_PROFILE_ALLOWED_KEYS = ['displayName'] as const;
 
-/**
- * Validasi body `PATCH /api/v1/profile`:
- * - Hanya mengizinkan `displayName` (maksimal 120 karakter).
- * - Menolak setiap usaha menyisipkan `role`, `uid`, `email`, atau field sistem lainnya (AUTH-04).
- */
+// Validasi Input Pembaruan Profil
 export function validateUpdateProfileInput(
   payload: Record<string, unknown>,
 ): UpdateProfileInput {
@@ -42,4 +30,3 @@ export function validateUpdateProfileInput(
 
   return { displayName };
 }
-

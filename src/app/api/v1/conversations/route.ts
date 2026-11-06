@@ -1,8 +1,3 @@
-/**
- * SISKA — Conversations Collection Route Handler (`/api/v1/conversations`)
- * Sumber otoritas: docs/04-API-SPEC.yaml (/conversations GET & POST)
- */
-
 import { withAuthenticatedRoute } from '@/server/authz/route-handler';
 import { jsonSuccess } from '@/server/errors/api-error';
 import {
@@ -18,11 +13,7 @@ import {
   validateCreateConversationInput,
 } from '@/server/validators';
 
-/**
- * `GET /api/v1/conversations`
- * Mengambil daftar percakapan milik pemanggil (reporter) atau yang ditugaskan kepada petugas (admin)
- * dengan amplop standar `{ items, nextCursor }`.
- */
+// GET /api/v1/conversations
 export const GET = withAuthenticatedRoute(
   async ({ requestId, caller }) => {
     const result = await listConversations(caller);
@@ -31,10 +22,7 @@ export const GET = withAuthenticatedRoute(
   { roles: ['reporter', 'admin'] },
 );
 
-/**
- * `POST /api/v1/conversations`
- * Membuat (`201 Created`) atau membuka kembali (`200 OK`) percakapan yang sah untuk pelapor (`reporter`).
- */
+// POST /api/v1/conversations
 export const POST = withAuthenticatedRoute(
   async ({ request, requestId, caller }) => {
     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.SEND_MESSAGE);

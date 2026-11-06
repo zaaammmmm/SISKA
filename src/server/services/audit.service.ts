@@ -38,7 +38,11 @@ export type AuditAction =
   | 'conversation.updated'
   | 'kb.document_uploaded'
   | 'kb.document_deleted'
-  | 'kb.reindex_requested';
+  | 'kb.reindex_requested'
+  | 'education.created'
+  | 'education.updated'
+  | 'education.deleted'
+  | 'notification.broadcast';
 
 export interface CreateAuditEventInput {
   actorUid: string;

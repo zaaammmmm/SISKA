@@ -1,11 +1,3 @@
-/**
- * SISKA — AI Chat & Knowledge Base Document Validators
- * Sumber otoritas:
- * - docs/04-API-SPEC.yaml (/ai/chat, /admin/knowledge-documents)
- * - docs/06-AI-ARCHITECTURE.md §3 & §4
- * - docs/09-TEST-PLAN.md AI-03, AI-04, KB-01
- */
-
 import { ApiError } from '@/server/errors/api-error';
 import {
   assertAllowlistedKeys,
@@ -22,15 +14,10 @@ export interface AiChatInput {
 
 const AI_CHAT_ALLOWED_KEYS = ['message', 'conversationId'] as const;
 
-/** Batas ukuran unggahan PDF Knowledge Base: 25 MiB (storage.rules line 7) */
+// Batas Ukuran PDF KB
 export const KB_PDF_MAX_BYTES = 25 * 1024 * 1024;
 
-/**
- * Validasi body `POST /api/v1/ai/chat` sesuai docs/04-API-SPEC.yaml:
- * - `message`: string [1..4000] (wajib)
- * - `conversationId`: string opsional
- * Menolak field `reportId`, `context`, atau `systemPrompt` dari client (NFR-PRIV-02 & AI-04).
- */
+// Validasi Input Chat AI
 export function validateAiChatInput(
   payload: Record<string, unknown>,
 ): AiChatInput {
@@ -61,10 +48,7 @@ export interface ValidatedKnowledgePdfUpload {
   bytes: Uint8Array;
 }
 
-/**
- * Validasi berkas PDF Knowledge Base yang diunggah melalui `multipart/form-data`
- * pada `POST /api/v1/admin/knowledge-documents` (docs/04-API-SPEC.yaml lines 240-256).
- */
+// Validasi Form Data PDF KB
 export async function validateKnowledgePdfFormData(
   formData: FormData,
 ): Promise<ValidatedKnowledgePdfUpload> {

@@ -1,16 +1,6 @@
-/**
- * SISKA — Server-Side Firestore Schema, Collection Registry, & Timestamp Helpers
- * Sumber otoritas:
- * - docs/02-ERD.md (Struktur koleksi & subkoleksi Firestore)
- * - docs/05-BACKEND-ARCHITECTURE.md §3 (`src/lib/firebase/firestore.ts`)
- */
-
 import { getAdminDb } from '@/lib/firebase/admin';
 
-/**
- * Nama koleksi & subkoleksi kanonis sesuai `docs/02-ERD.md`.
- * Digunakan sebagai satu sumber kebenaran agar seluruh layanan backend konsisten.
- */
+// Koleksi Firestore
 export const FIRESTORE_COLLECTIONS = {
   USERS: 'users',
   REPORTS: 'reports',
@@ -21,13 +11,18 @@ export const FIRESTORE_COLLECTIONS = {
   KNOWLEDGE_DOCUMENTS: 'knowledgeDocuments',
   KNOWLEDGE_CHUNKS: 'knowledgeChunks',
   AUDIT_EVENTS: 'auditEvents',
+  EDUCATION: 'education',
+  NOTIFICATIONS: 'notifications',
 } as const;
 
-/**
- * Helper terpusat untuk mengakses referensi koleksi dan subkoleksi Firestore.
- */
+// Referensi Koleksi
 export const firestoreCollections = {
   users: () => getAdminDb().collection(FIRESTORE_COLLECTIONS.USERS),
+  userNotifications: (uid: string) =>
+    getAdminDb()
+      .collection(FIRESTORE_COLLECTIONS.USERS)
+      .doc(uid)
+      .collection(FIRESTORE_COLLECTIONS.NOTIFICATIONS),
   reports: () => getAdminDb().collection(FIRESTORE_COLLECTIONS.REPORTS),
   reportStatusHistory: (reportId: string) =>
     getAdminDb()
@@ -52,12 +47,11 @@ export const firestoreCollections = {
     getAdminDb().collection(FIRESTORE_COLLECTIONS.KNOWLEDGE_CHUNKS),
   auditEvents: () =>
     getAdminDb().collection(FIRESTORE_COLLECTIONS.AUDIT_EVENTS),
+  education: () =>
+    getAdminDb().collection(FIRESTORE_COLLECTIONS.EDUCATION),
 } as const;
 
-/**
- * Mengonversi nilai waktu Firestore (`Timestamp`, `Date`, atau string ISO) menjadi string ISO-8601 atau `null`.
- * Digunakan secara terpusat oleh seluruh domain service untuk mencegah duplikasi logika serialisasi waktu.
- */
+// Helper Konversi Waktu
 export function toIsoStringOrNull(value: unknown): string | null {
   if (!value) return null;
   if (value instanceof Date) {
@@ -78,9 +72,6 @@ export function toIsoStringOrNull(value: unknown): string | null {
   return null;
 }
 
-/**
- * Mengonversi nilai waktu Firestore menjadi string ISO-8601 yang dijamin non-null.
- */
 export function toIsoDateString(value: unknown): string {
   return toIsoStringOrNull(value) ?? new Date(0).toISOString();
 }

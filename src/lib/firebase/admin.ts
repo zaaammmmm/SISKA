@@ -1,12 +1,3 @@
-/**
- * SISKA — Firebase Admin SDK (HANYA SERVER)
- * Sumber otoritas: docs/05-BACKEND-ARCHITECTURE.md §2.4 & §4, docs/01-SRS.md NFR-SEC-02
- *
- * Peringatan Keamanan:
- * Modul ini hanya boleh diimpor dari Next.js Route Handlers atau Server Services (`src/server/**`).
- * Dilarang keras mengimpor modul ini dari komponen Client (`"use client"`).
- */
-
 import {
   initializeApp,
   getApps,
@@ -22,7 +13,7 @@ import { getStorage, type Storage } from 'firebase-admin/storage';
 
 if (typeof window !== 'undefined') {
   throw new Error(
-    '[SISKA Security Violation] src/lib/firebase/admin.ts tidak boleh diimpor di sisi browser/client (NFR-SEC-02).',
+    '[SISKA Security Violation] src/lib/firebase/admin.ts tidak boleh diimpor di sisi browser/client.',
   );
 }
 
@@ -35,10 +26,7 @@ export interface EmulatorConfigStatus {
   storageHost?: string;
 }
 
-/**
- * Memeriksa dan memvalidasi konfigurasi environment Firebase Admin.
- * Mencegah kondisi berbahaya setengah-emulator setengah-produksi (sesuai pola pengaman seed.mjs).
- */
+// Firebase Admin Config
 export function resolveAdminConfig(): EmulatorConfigStatus {
   const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST?.trim() || undefined;
   const authHost = process.env.FIREBASE_AUTH_EMULATOR_HOST?.trim() || undefined;
@@ -84,9 +72,7 @@ export function resolveAdminConfig(): EmulatorConfigStatus {
   };
 }
 
-/**
- * Mengembalikan instance singleton Firebase Admin App.
- */
+// Firebase Admin App
 export function getAdminApp(): App {
   if (getApps().length > 0) {
     return getApp();
@@ -116,29 +102,28 @@ export function getAdminApp(): App {
   return initializeApp(options);
 }
 
-/** Firebase Admin Auth untuk verifikasi ID Token dan pembacaan/penetapan Custom Claims */
+// Firebase Admin Auth
 export function getAdminAuth(): Auth {
   return getAuth(getAdminApp());
 }
 
-/** Cloud Firestore Admin untuk operasi database server & transaksi atomik */
+// Firestore Admin
 export function getAdminDb(): Firestore {
   return getFirestore(getAdminApp());
 }
 
-/** Cloud Storage Admin untuk pembuatan Signed URL & manajemen objek privat */
+// Cloud Storage Admin
 export function getAdminStorage(): Storage {
   return getStorage(getAdminApp());
 }
 
-/** Mengembalikan bucket default Cloud Storage */
+// Default Storage Bucket
 export function getAdminBucket() {
   const cfg = resolveAdminConfig();
   return getAdminStorage().bucket(cfg.storageBucket);
 }
 
-/** Apakah server sedang berjalan terhadap Firebase Emulator Suite */
+// Emulator Mode Check
 export function isFirebaseEmulatorMode(): boolean {
   return resolveAdminConfig().isEmulator;
 }
-

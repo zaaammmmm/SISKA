@@ -11,7 +11,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",
-    "test": "node --import ./src/tests/ts-alias-loader.mjs --test src/tests/unit/backend-test-plan.test.mjs src/tests/unit/ai-reply.test.mjs src/tests/unit/ai-pdf-extractor.test.mjs",
+    "test": "node --import ./src/tests/ts-alias-loader.mjs --test src/tests/unit/backend-test-plan.test.mjs src/tests/unit/ai-reply.test.mjs src/tests/unit/ai-pdf-extractor.test.mjs src/tests/unit/education-notification.test.mjs",
     "seed:dry": "node seed.mjs --dry-run",
     "seed": "node seed.mjs --emulator",
     "seed:reset": "node seed.mjs --emulator --reset",

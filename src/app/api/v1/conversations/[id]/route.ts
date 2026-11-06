@@ -1,8 +1,3 @@
-/**
- * SISKA — Single Conversation Route Handler (`/api/v1/conversations/[id]`)
- * Sumber otoritas: docs/01-SRS.md FR-010, docs/08-AUTHORIZATION-MATRIX.md
- */
-
 import { withAuthenticatedRoute } from '@/server/authz/route-handler';
 import { jsonSuccess } from '@/server/errors/api-error';
 import {
@@ -23,10 +18,7 @@ interface ConversationRouteParams {
   id: string;
 }
 
-/**
- * `GET /api/v1/conversations/{conversationId}`
- * Mengambil detail percakapan bagi partisipan yang sah.
- */
+// GET /api/v1/conversations/[id]
 export const GET = withAuthenticatedRoute<ConversationRouteParams>(
   async ({ requestId, caller, params }) => {
     const conversationId = validateResourceId(params.id, 'conversationId');
@@ -36,10 +28,7 @@ export const GET = withAuthenticatedRoute<ConversationRouteParams>(
   { roles: ['reporter', 'admin'] },
 );
 
-/**
- * `PATCH /api/v1/conversations/{conversationId}`
- * Memperbarui penugasan admin (`assignedAdminId`) atau status percakapan (`open` | `closed`) khusus Admin.
- */
+// PATCH /api/v1/conversations/[id]
 export const PATCH = withAuthenticatedRoute<ConversationRouteParams>(
   async ({ request, requestId, caller, params }) => {
     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.ADMIN_MUTATION);
@@ -56,4 +45,3 @@ export const PATCH = withAuthenticatedRoute<ConversationRouteParams>(
   },
   { adminOnly: true },
 );
-

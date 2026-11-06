@@ -43,10 +43,13 @@ const ALLOWED_KEYS = {
   knowledgeDocuments: ['title', 'sourceUrl', 'storagePath', 'sha256', 'uploadedBy', 'status', 'chunkCount', 'version', 'errorCode', 'createdAt', 'updatedAt'],
   knowledgeChunks: ['documentId', 'documentVersion', 'chunkIndex', 'page', 'section', 'text', 'createdAt'],
   auditEvents: ['actorUid', 'action', 'targetType', 'targetId', 'occurredAt', 'requestId'],
+  education: ['title', 'slug', 'tag', 'category', 'icon', 'excerpt', 'content', 'readingTimeMinutes', 'isPublished', 'sortOrder', 'createdBy', 'createdAt', 'updatedAt'],
+  notifications: ['recipientUid', 'type', 'title', 'body', 'targetType', 'targetId', 'isRead', 'readAt', 'createdAt'],
 };
 
 const PATH_KIND = [
   [/^users\/[^/]+$/, 'users'],
+  [/^users\/[^/]+\/notifications\/[^/]+$/, 'notifications'],
   [/^reports\/[^/]+$/, 'reports'],
   [/^reports\/[^/]+\/evidence\/[^/]+$/, 'evidence'],
   [/^reports\/[^/]+\/statusHistory\/[^/]+$/, 'statusHistory'],
@@ -55,6 +58,7 @@ const PATH_KIND = [
   [/^knowledgeDocuments\/[^/]+$/, 'knowledgeDocuments'],
   [/^knowledgeChunks\/[^/]+$/, 'knowledgeChunks'],
   [/^auditEvents\/[^/]+$/, 'auditEvents'],
+  [/^education\/[^/]+$/, 'education'],
 ];
 export const kindOfPath = (p) => PATH_KIND.find(([re]) => re.test(p))?.[1] ?? null;
 
@@ -398,6 +402,111 @@ export function buildDataset({ withAdversarial = false } = {}) {
   audit.push({ actorUid: UID.admin1, action: 'kb.reindex_requested', targetType: 'knowledgeDocument', targetId: 'all', occurredAt: t('2026-10-02T11:00') });
   // Dokumen lama yang sudah dihapus: audit tetap ada walau dokumennya tidak ada lagi.
   audit.push({ actorUid: UID.admin1, action: 'kb.document_deleted', targetType: 'knowledgeDocument', targetId: 'seed_kb_lama', occurredAt: t('2026-10-03T09:00') });
+
+  // education/{id}
+  const EDU_ITEMS = [
+    {
+      id: 'seed_edu_01',
+      title: 'Memahami Persetujuan',
+      slug: 'memahami-persetujuan',
+      tag: 'Persetujuan',
+      category: 'general',
+      icon: 'heart',
+      excerpt: 'Persetujuan harus bebas, jelas, dan dapat ditarik kembali. Diam atau tekanan bukan persetujuan.',
+      content: 'Persetujuan (consent) merupakan persetujuan sadar dan sukarela yang diberikan oleh seseorang tanpa adanya paksaan, ancaman, tipu muslihat, atau penyalahgunaan kekuasaan. Persetujuan dapat ditarik kembali kapan saja.',
+      readingTimeMinutes: 4,
+      isPublished: true,
+      sortOrder: 1,
+      createdBy: UID.admin1,
+      createdAt: t('2026-09-10T08:00'),
+      updatedAt: t('2026-09-10T08:00'),
+    },
+    {
+      id: 'seed_edu_02',
+      title: 'Saat Sesuatu Terasa Tidak Nyaman',
+      slug: 'saat-sesuatu-terasa-tidak-nyaman',
+      tag: 'Mengenali dampak',
+      category: 'general',
+      icon: 'alert',
+      excerpt: 'Pesan, komentar, atau perilaku yang tidak diinginkan dapat melanggar batas. Perasaanmu layak didengar.',
+      content: 'Bentuk pelecehan tidak selalu kontak fisik langsung. Komentar bernada seksual di media sosial, pengiriman pesan berulang tanpa izin, lelucon seksis, atau tatapan intimidatif termasuk dalam kategori kekerasan berbasis gender.',
+      readingTimeMinutes: 5,
+      isPublished: true,
+      sortOrder: 2,
+      createdBy: UID.admin1,
+      createdAt: t('2026-09-11T09:00'),
+      updatedAt: t('2026-09-11T09:00'),
+    },
+    {
+      id: 'seed_edu_03',
+      title: 'Mencari Pendampingan dan Layanan',
+      slug: 'mencari-pendampingan-dan-layanan',
+      tag: 'Dukungan',
+      category: 'guide',
+      icon: 'users',
+      excerpt: 'Pertimbangkan orang tepercaya dan petugas layanan. Kamu dapat bertanya tentang pilihan dukungan sebelum memutuskan.',
+      content: 'Unit layanan terpadu kampus siap memberikan pendampingan psikologis, konseling, bantuan medis, dan informasi pendampingan hukum. Anda memiliki kendali penuh atas tahapan layanan yang ingin diambil.',
+      readingTimeMinutes: 4,
+      isPublished: true,
+      sortOrder: 3,
+      createdBy: UID.admin1,
+      createdAt: t('2026-09-12T10:00'),
+      updatedAt: t('2026-09-12T10:00'),
+    },
+    {
+      id: 'seed_edu_04',
+      title: 'Menjaga Informasi Pribadi',
+      slug: 'menjaga-informasi-pribadi',
+      tag: 'Privasi',
+      category: 'guide',
+      icon: 'shield',
+      excerpt: 'Bagikan seperlunya. Hindari mengunggah identitas pihak lain atau password; periksa lampiran sebelum dibagikan.',
+      content: 'SISKA memprioritaskan keamanan identitas pelapor. Saat menyampaikan kronologi dan mengunggah berkas bukti, Anda berhak menyamarkan nama atau menghapus data pribadi yang tidak relevan dengan peristiwa.',
+      readingTimeMinutes: 3,
+      isPublished: true,
+      sortOrder: 4,
+      createdBy: UID.admin2,
+      createdAt: t('2026-09-13T11:00'),
+      updatedAt: t('2026-09-13T11:00'),
+    },
+  ];
+
+  for (const ed of EDU_ITEMS) {
+    const { id, ...data } = ed;
+    add(`education/${id}`, data);
+    audit.push({
+      actorUid: ed.createdBy,
+      action: 'education.created',
+      targetType: 'education',
+      targetId: id,
+      occurredAt: ed.createdAt,
+    });
+  }
+
+  // users/{uid}/notifications/{id}
+  add(`users/${UID.reporterA}/notifications/seed_notif_01`, {
+    recipientUid: UID.reporterA,
+    type: 'report_status_changed',
+    title: 'Status Laporan Diperbarui',
+    body: 'Status laporan SIS-2026-0001 kini dalam peninjauan oleh petugas.',
+    targetType: 'report',
+    targetId: 'seed_rpt_01',
+    isRead: false,
+    readAt: null,
+    createdAt: t('2026-10-12T10:30'),
+  });
+
+  add(`users/${UID.reporterB}/notifications/seed_notif_02`, {
+    recipientUid: UID.reporterB,
+    type: 'new_chat_message',
+    title: 'Pesan Baru Diterima',
+    body: 'Petugas telah menanggapi ruang percakapan laporan Anda.',
+    targetType: 'conversation',
+    targetId: 'conv_seed_reporter_b_seed_rpt_03',
+    isRead: true,
+    readAt: t('2026-10-18T14:00'),
+    createdAt: t('2026-10-18T13:45'),
+  });
 
   // auditEvents: urut waktu, ID berurutan; hanya metadata minimal (tanpa isi laporan/catatan).
   audit
