@@ -20,7 +20,7 @@ const NAV = {
     { href: "/user/reports", label: "Riwayat Laporan", icon: Copy },
     { href: "/user/chat", label: "Chat dengan Admin", icon: Headset },
     { href: "/user/ai", label: "Chatbot AI", icon: Bot },
-    { href: "/user/education", label: "Edukasi", icon: BookOpen },
+    { href: "/education", label: "Edukasi", icon: BookOpen },
     { href: "/user/profile", label: "Profil dan Pengaturan", icon: SlidersHorizontal },
   ],
   admin: [

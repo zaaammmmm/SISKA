@@ -4,7 +4,7 @@ import { Logo } from "@/components/logo";
 
 const features = [
   { icon: FileText, title: "Pelaporan yang terarah", body: "Susun laporan dengan panduan yang jelas. Detail tambahan dapat dibagikan saat kamu siap.", cta: "Mulai Buat Laporan", href: "/user/new-report" },
-  { icon: HeartHandshake, title: "Pendampingan psikologis", body: "Kenali pilihan dukungan profesional. Hubungi petugas untuk informasi layanan yang tersedia.", cta: "Pelajari Pendampingan", href: "/user/education" },
+  { icon: HeartHandshake, title: "Pendampingan psikologis", body: "Kenali pilihan dukungan profesional. Hubungi petugas untuk informasi layanan yang tersedia.", cta: "Pelajari Pendampingan", href: "/education" },
   { icon: Bot, title: "Butuh Informasi Awal?", body: "Tanyakan alur layanan dan penggunaan SISKA. AI bukan pengganti pendamping profesional.", cta: "Tanya SISKA AI", href: "/user/ai" },
 ];
 
@@ -22,9 +22,9 @@ export default function Home() {
           <div><Logo size={38} /></div>
           <nav className="pub-nav" aria-label="Menu utama">
             <Link href="/" className="active">Beranda</Link>
-            <Link href="#layanan">Layanan</Link>
-            <Link href="/user/education">Edukasi</Link>
-            <Link href="/register/terms">Tentang</Link>
+            <Link href="/layanan">Layanan</Link>
+            <Link href="/education">Edukasi</Link>
+            <Link href="/about">Tentang</Link>
           </nav>
           <div className="pub-cta">
             <Link href="/login" className="login">Login</Link>
@@ -42,7 +42,7 @@ export default function Home() {
               <p className="lead">Sampaikan laporan, pahami pilihan layanan, dan temukan dukungan. Tidak perlu menceritakan lebih dari yang kamu siap bagikan.</p>
               <div className="hero-actions">
                 <Link href="/user/new-report" className="btn btn-primary"><FilePlus2 aria-hidden /> Buat Laporan</Link>
-                <Link href="#layanan" className="btn btn-outline">Pelajari Layanan</Link>
+                <Link href="/layanan" className="btn btn-outline">Pelajari Layanan</Link>
               </div>
             </div>
             <aside className="hero-card">
@@ -94,7 +94,7 @@ export default function Home() {
           </div>
           <nav aria-label="Tautan footer">
             <Link href="/user/education">Panduan layanan</Link>
-            <Link href="/register/terms">Syarat dan Ketentuan</Link>
+            <Link href="/about">Tentang SISKA</Link>
           </nav>
         </div>
       </footer>

@@ -64,7 +64,7 @@ export function UserDashboard() {
           <BookOpen className="top" aria-hidden />
           <h3>Pahami hak dan pilihanmu</h3>
           <p>Baca materi tentang persetujuan, dukungan, dan privasi.</p>
-          <Link href="/user/education" className="link-teal" style={{ paddingLeft: 9 }}>Buka Edukasi</Link>
+          <Link href="/education" className="link-teal" style={{ paddingLeft: 9 }}>Buka Edukasi</Link>
         </section>
       </div>
     </AppShell>
@@ -223,7 +223,7 @@ function HistoryInner() {
           <h3>{source.length === 0 ? "Belum ada laporan" : "Laporan tidak ditemukan"}</h3>
           <p>{source.length === 0 ? "Kamu bisa memulai saat merasa siap. Tidak perlu terburu-buru." : "Coba ubah kata kunci atau filter status."}</p>
           <Link href="/user/new-report" className="btn btn-primary"><Plus aria-hidden /> Buat Laporan Baru</Link>
-          <Link href="/user/education" className="link-teal">Pelajari layanan terlebih dahulu</Link>
+          <Link href="/education" className="link-teal">Pelajari layanan terlebih dahulu</Link>
         </div>
       ) : (
         <>
