@@ -106,15 +106,28 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+export function buildApiUrl(path: string, origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'): URL {
+  const rawPath = (path ?? '').trim();
+  const normalizedBase = '/api/v1';
+
+  if (!rawPath || rawPath === '/') {
+    return new URL(normalizedBase, origin);
+  }
+
+  const candidate = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+  if (candidate === normalizedBase || candidate.startsWith(`${normalizedBase}/`)) {
+    return new URL(candidate, origin);
+  }
+
+  return new URL(`${normalizedBase}${candidate}`, origin);
+}
+
 async function apiRequest<TResponse>(
   path: string,
   options: RequestOptions = {},
 ): Promise<TResponse> {
   const token = await getActiveBearerToken(options.forceRefreshToken);
-  const url = new URL(
-    path.startsWith('/') ? `/api/v1${path}` : `/api/v1/${path}`,
-    typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000',
-  );
+  const url = buildApiUrl(path);
 
   if (options.searchParams) {
     for (const [key, val] of Object.entries(options.searchParams)) {
@@ -364,6 +377,15 @@ export async function updateConversationStatusByAdmin(
       method: 'PATCH',
       body: patch,
     },
+  );
+}
+
+export async function markConversationAsRead(
+  conversationId: string,
+): Promise<{ conversationId: string; readAt: string }> {
+  return apiRequest<{ conversationId: string; readAt: string }>(
+    `/conversations/${encodeURIComponent(conversationId)}/read`,
+    { method: 'POST' },
   );
 }
 

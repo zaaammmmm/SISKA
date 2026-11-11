@@ -84,8 +84,8 @@ function contactBody(question = '') {
         {
             section: /^(?:2\.\s*SAPA|Layanan nasional)/i,
             label: 'SAPA (layanan nasional)',
-            number: /(?:telepon|SAPA 129):\s*\**([\d-]+)/i,
-            whatsapp: /whatsapp:\s*\**([\d-]+)/i,
+            number: /telepon\s*\**([\d-]+)/i,
+            whatsapp: /whatsapp\s*:?\s*\**([\d-]+)/i,
         },
     ];
     const hits = [];

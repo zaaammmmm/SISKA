@@ -1,0 +1,64 @@
+# SISKA SELECTIVE SECURITY INTEGRATION PATCH
+
+Target: SISKA.zip (latest archive supplied on 11 November 2026)
+Source: SISKA-developmen.zip (development archive supplied on 11 November 2026)
+
+This patch selectively restores security controls and test infrastructure from
+SISKA-developmen while preserving the newer chat, education, notification,
+public-page, and Node.js AI/RAG implementations from SISKA.zip.
+
+## Files restored from development
+
+- docs/11-SECURITY-RULES-TEST-RESULTS.md through docs/17-SECURITY-JOBDESK-TRACEABILITY.md
+- scripts/idor-check.mjs
+- src/tests/rules/firestore.rules.test.mjs
+- src/tests/rules/storage.rules.test.mjs
+- security-oriented firestore.rules and storage.rules
+- canonical-field precedence in src/server/authz/permissions.ts
+
+## Compatibility adjustments
+
+- firebase.json.example Firestore emulator port is aligned to 8085, matching
+  the actual firebase.json in the target archive.
+- next.config.ts CSP connect-src allows the same Firestore emulator port 8085.
+- package.json gains Rules Unit Testing and security test scripts while retaining
+  the latest archive's unit test suites and its current Next.js version.
+- Six unit tests cover canonical conversation owner/assignee fields and legacy
+  alias fallback behavior.
+
+## Intentionally preserved from SISKA.zip
+
+- Chat UI, realtime conversation/message listeners, unread count, and read receipts.
+- Education pages, API routes, validators, and services.
+- Notification center, API routes, validators, and services.
+- Public pages, AI UI, Node.js RAG service, and existing AI/PDF tests.
+- firestore.indexes.json and the root firebase.json emulator configuration.
+
+## Important security behavior
+
+- Firestore Client SDK reads remain available only for authorized user profiles,
+  report ownership/admin reads, and authorized realtime conversation/message reads.
+- Direct Firestore Client SDK writes are denied; mutations must use validated API
+  routes and Firebase Admin SDK.
+- Direct Firebase Storage Client SDK reads/writes are denied. Evidence and
+  Knowledge Base files use the authorized backend/Admin SDK or signed URLs.
+- reporterId and assignedAdminId are canonical. reporterUid/adminUid are used
+  only when the canonical field is absent, never when it is explicitly null,
+  empty, or conflicting.
+
+## Deliberately excluded
+
+- .env, .env.local, service-account keys, and all other local credentials.
+- firebase-debug.log, build output, node_modules, and tsconfig.tsbuildinfo.
+- security-evidence/idor-test-2026-11-02.txt: this is historical output from a
+  different source snapshot and must not be presented as validation of this patch.
+- package-lock.json: regenerate it after installing the added development
+  dependency, then review and commit the lockfile from the target repository.
+
+## Validation status
+
+The six new canonical-field unit tests were executed with Node.js 22.16.0 and
+passed (6/6). The Firestore Rules, Storage Rules, full unit suite, IDOR suite,
+TypeScript check, and production build were not run in this packaging session.
+Do not deploy the rules or report those suites as passing until they are run
+against the merged repository and the actual results are recorded.

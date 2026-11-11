@@ -162,6 +162,8 @@ export interface SerializedConversation {
   lastMessage?: string | null;
   lastMessageSenderUid?: string | null;
   lastMessageAt?: string | null;
+  /** Jumlah pesan masuk yang belum dibaca oleh caller. */
+  unreadCount: number;
 }
 
 export type PaginatedConversationsResult =
@@ -173,6 +175,8 @@ export interface SerializedMessage {
   body: string;
   createdAt: string;
   attachmentPath: string | null;
+  /** true jika penerima telah membuka percakapan setelah pesan ini dikirim. */
+  readByRecipient: boolean;
 }
 
 export type PaginatedMessagesResult = PaginatedResponse<SerializedMessage>;
@@ -287,6 +291,8 @@ export type PaginatedNotificationsResult =
 
 export interface UnreadNotificationCountResult {
   unreadCount: number;
+  unreadReportCount: number;
+  unreadConversationCount: number;
 }
 
 export interface BroadcastNotificationResult {

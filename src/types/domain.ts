@@ -163,6 +163,7 @@ export interface EducationDocument {
 
 export const NOTIFICATION_TYPES = [
   'report_status_changed',
+  'new_report_submitted',
   'new_chat_message',
   'system_announcement',
 ] as const;

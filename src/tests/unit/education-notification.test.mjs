@@ -342,11 +342,11 @@ test('NOTIF-03: Counter notifikasi belum dibaca (unreadCount) akurat', async () 
   seedMockDocs([
     {
       path: `users/${CALLER_REPORTER_1.uid}/notifications/notif_1`,
-      data: { isRead: false },
+      data: { isRead: false, targetType: 'report' },
     },
     {
       path: `users/${CALLER_REPORTER_1.uid}/notifications/notif_2`,
-      data: { isRead: false },
+      data: { isRead: false, targetType: 'conversation' },
     },
     {
       path: `users/${CALLER_REPORTER_1.uid}/notifications/notif_3`,
@@ -356,6 +356,8 @@ test('NOTIF-03: Counter notifikasi belum dibaca (unreadCount) akurat', async () 
 
   const countResult = await getUnreadNotificationCount(CALLER_REPORTER_1);
   assert.equal(countResult.unreadCount, 2);
+  assert.equal(countResult.unreadReportCount, 1);
+  assert.equal(countResult.unreadConversationCount, 1);
 });
 
 test('NOTIF-04 & NOTIF-05: Menandai notifikasi sebagai terbaca & proteksi Anti-IDOR (404)', async () => {
@@ -465,4 +467,32 @@ test('NOTIF-08: Transisi status laporan secara otomatis memicu pembuatan notifik
   assert.equal(notifs[0].data.type, 'report_status_changed');
   assert.equal(notifs[0].data.targetId, 'rpt_auto_notif');
   assert.match(notifs[0].data.body, /Dalam peninjauan/);
+});
+
+test('NOTIF-09: Target notifikasi harus diarahkan ke halaman yang sesuai per jenis event', async () => {
+  const { resolveNotificationTarget } = await import('@/lib/notification-targets');
+
+  assert.deepEqual(resolveNotificationTarget('report', 'rpt_123', 'reporter'), {
+    href: '/user/reports',
+    query: { reportId: 'rpt_123' },
+    label: 'Lihat laporan',
+  });
+
+  assert.deepEqual(resolveNotificationTarget('conversation', 'conv_123', 'admin'), {
+    href: '/admin/chat',
+    query: { conversationId: 'conv_123' },
+    label: 'Buka percakapan',
+  });
+
+  assert.deepEqual(resolveNotificationTarget('education', 'edu_123', 'reporter'), {
+    href: '/education/detail/edu_123',
+    query: null,
+    label: 'Buka edukasi',
+  });
+
+  assert.deepEqual(resolveNotificationTarget('none', null, 'reporter'), {
+    href: '/user',
+    query: null,
+    label: 'Lihat detail',
+  });
 });

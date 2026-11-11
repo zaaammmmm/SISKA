@@ -1,152 +1,188 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ------------------------------------------------------------------
+    // Identitas dan role
+    // ------------------------------------------------------------------
     function signedIn() {
       return request.auth != null;
     }
 
-    function isAdmin() {
-      return signedIn() && request.auth.token.role == 'admin';
-    }
-
-    function isReporter() {
+    // Role yang valid pada Custom Claims adalah otoritas utama.
+    function hasValidRoleClaim() {
       return signedIn() && (
-        request.auth.token.role == 'reporter' ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'reporter')
+        request.auth.token.get('role', '') == 'reporter' ||
+        request.auth.token.get('role', '') == 'admin'
       );
     }
 
-    function isReportOwner(reportId) {
-      return signedIn() &&
-        exists(/databases/$(database)/documents/reports/$(reportId)) &&
-        get(/databases/$(database)/documents/reports/$(reportId)).data.reporterId == request.auth.uid;
+    function isAdmin() {
+      return signedIn() && request.auth.token.get('role', '') == 'admin';
+    }
+
+    // Konsisten dengan verifyBearerToken(): profil hanya menjadi fallback
+    // reporter jika token belum memiliki claim role SISKA yang valid.
+    // Claim admin tidak pernah diturunkan menjadi reporter melalui profil.
+    function isReporter() {
+      return signedIn() && (
+        request.auth.token.get('role', '') == 'reporter' ||
+        (
+          !hasValidRoleClaim() &&
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'reporter'
+        )
+      );
+    }
+
+    // ------------------------------------------------------------------
+    // Akses baca percakapan
+    // ------------------------------------------------------------------
+    // reporterId dan assignedAdminId adalah field kanonis.
+    // reporterUid/adminUid hanya fallback untuk dokumen legacy jika field
+    // kanonis sama sekali tidak ada. Alias yang berkonflik tidak memberi akses.
+    function isConversationReporter(convData) {
+      return isReporter() && (
+        (
+          convData.keys().hasAny(['reporterId']) &&
+          convData.get('reporterId', '') == request.auth.uid
+        ) ||
+        (
+          !convData.keys().hasAny(['reporterId']) &&
+          convData.get('reporterUid', '') == request.auth.uid
+        )
+      );
+    }
+
+    function isAssignedAdmin(convData) {
+      return isAdmin() && (
+        (
+          convData.keys().hasAny(['assignedAdminId']) &&
+          convData.get('assignedAdminId', null) == request.auth.uid
+        ) ||
+        (
+          !convData.keys().hasAny(['assignedAdminId']) &&
+          convData.get('adminUid', null) == request.auth.uid
+        )
+      );
+    }
+
+    function isUnassignedConversation(convData) {
+      return (
+        (
+          convData.keys().hasAny(['assignedAdminId']) &&
+          (
+            convData.get('assignedAdminId', null) == null ||
+            convData.get('assignedAdminId', null) == ''
+          )
+        ) ||
+        (
+          !convData.keys().hasAny(['assignedAdminId']) &&
+          (
+            convData.get('adminUid', null) == null ||
+            convData.get('adminUid', null) == ''
+          )
+        )
+      );
     }
 
     function isConversationParticipant(convData) {
       return signedIn() && (
-        convData.get('reporterId', '') == request.auth.uid ||
-        convData.get('reporterUid', '') == request.auth.uid ||
-        (isAdmin() && (
-          convData.get('assignedAdminId', null) == request.auth.uid ||
-          convData.get('adminUid', null) == request.auth.uid ||
-          (convData.get('assignedAdminId', null) == null && convData.get('adminUid', null) == null)
-        ))
+        isConversationReporter(convData) ||
+        (
+          isAdmin() &&
+          (isAssignedAdmin(convData) || isUnassignedConversation(convData))
+        )
       );
     }
 
-    // users
+    // Kepemilikan laporan untuk pembacaan metadata subkoleksi.
+    function isReportOwner(reportId) {
+      return isReporter() &&
+        exists(/databases/$(database)/documents/reports/$(reportId)) &&
+        get(/databases/$(database)/documents/reports/$(reportId)).data.get('reporterId', '') == request.auth.uid;
+    }
+
+    // ------------------------------------------------------------------
+    // users/{uid}
+    // ------------------------------------------------------------------
     match /users/{uid} {
-      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
-      allow create: if signedIn()
-        && request.auth.uid == uid
-        && request.resource.data.uid == uid
-        && request.resource.data.role == 'reporter'
-        && request.resource.data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'createdAt', 'updatedAt']);
-      allow update: if signedIn()
-        && request.auth.uid == uid
-        && request.resource.data.uid == resource.data.uid
-        && request.resource.data.role == resource.data.role
-        && request.resource.data.email == resource.data.email
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'createdAt', 'updatedAt']);
-      allow delete: if false;
+      // Get satu profil: pemilik sendiri atau admin. Listing profil massal
+      // dari Client SDK ditutup; kebutuhan operasional melalui backend.
+      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if false;
 
-      // notifications
-      match /notifications/{notificationId} {
-        allow read: if signedIn() && request.auth.uid == uid;
-        allow update: if signedIn() && request.auth.uid == uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt']);
-        allow create, delete: if false;
-      }
+      // Semua mutasi profil/provisioning melewati API + Firebase Admin SDK.
+      // Client tidak boleh mengubah role, email, UID, maupun metadata sistem.
+      allow create, update, delete: if false;
     }
 
-    // reports
+    // ------------------------------------------------------------------
+    // reports/{reportId}
+    // ------------------------------------------------------------------
     match /reports/{reportId} {
-      allow create: if isReporter()
-        && request.resource.data.reporterId == request.auth.uid
-        && request.resource.data.status == 'submitted'
-        && request.resource.data.category is string
-        && request.resource.data.category.size() >= 1
-        && request.resource.data.category.size() <= 100
-        && request.resource.data.description is string
-        && request.resource.data.description.size() >= 1
-        && request.resource.data.description.size() <= 20000
-        && request.resource.data.keys().hasOnly([
-          'reporterId', 'category', 'incidentAt', 'location',
-          'description', 'status', 'createdAt', 'updatedAt', 'resolvedAt'
-        ]);
-      allow read: if signedIn() && (resource.data.reporterId == request.auth.uid || isAdmin());
-      allow update, delete: if false;
+      // Kebijakan saat ini: reporter hanya membaca miliknya; admin dengan
+      // Custom Claim admin dapat membaca semua laporan. Cakupan admin menjadi
+      // keputusan kebijakan SEC-F03 dan harus disetujui tim sebelum produksi.
+      allow get, list: if isAdmin() ||
+        (isReporter() && resource.data.get('reporterId', '') == request.auth.uid);
 
-      // evidence
+      // Pembuatan/perubahan/penghapusan hanya melalui ReportService. Service
+      // mengatur validasi, transaksi statusHistory, serta auditEvents.
+      allow create, update, delete: if false;
+
       match /evidence/{evidenceId} {
-        allow read: if isReportOwner(reportId) || isAdmin();
+        allow get, list: if isAdmin() || isReportOwner(reportId);
         allow create, update, delete: if false;
       }
 
-      // statusHistory
       match /statusHistory/{eventId} {
-        allow read: if isReportOwner(reportId) || isAdmin();
+        allow get, list: if isAdmin() || isReportOwner(reportId);
         allow create, update, delete: if false;
       }
     }
 
-    // conversations
+    // ------------------------------------------------------------------
+    // conversations/{conversationId} dan messages
+    // ------------------------------------------------------------------
     match /conversations/{conversationId} {
-      allow read: if isConversationParticipant(resource.data);
-      allow create: if isReporter()
-        && request.resource.data.reporterId == request.auth.uid
-        && request.resource.data.type == 'report_admin'
-        && request.resource.data.status == 'open'
-        && request.resource.data.keys().hasOnly([
-          'type', 'reporterId', 'assignedAdminId', 'reportId', 'status', 'createdAt', 'updatedAt'
-        ]);
-      allow update, delete: if false;
+      allow get, list: if isConversationParticipant(resource.data);
 
-      // messages
+      // Buat, assign/claim admin, close/reopen, dan perubahan lain dilakukan
+      // oleh ConversationService melalui API + Admin SDK dalam transaksi.
+      allow create, update, delete: if false;
+
       match /messages/{messageId} {
-        allow read: if isConversationParticipant(
+        allow get, list: if isConversationParticipant(
           get(/databases/$(database)/documents/conversations/$(conversationId)).data
         );
-        allow create: if isConversationParticipant(
-            get(/databases/$(database)/documents/conversations/$(conversationId)).data
-          )
-          && get(/databases/$(database)/documents/conversations/$(conversationId)).data.status == 'open'
-          && request.resource.data.senderUid == request.auth.uid
-          && request.resource.data.body is string
-          && request.resource.data.body.size() >= 1
-          && request.resource.data.body.size() <= 10000
-          && request.resource.data.keys().hasOnly(['senderUid', 'body', 'createdAt', 'attachmentPath']);
-        allow update, delete: if false;
+
+        // Pengiriman pesan harus melalui API agar pemeriksaan mode 'send',
+        // rate limit, sender dari token, status, claim admin, transaksi dan
+        // audit backend tidak dapat dilewati oleh Client SDK.
+        allow create, update, delete: if false;
       }
     }
 
-    // knowledgeDocuments
+    // ------------------------------------------------------------------
+    // Knowledge Base dan audit
+    // ------------------------------------------------------------------
     match /knowledgeDocuments/{documentId} {
-      allow read: if isAdmin();
-      allow write: if false;
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
     }
 
-    // knowledgeChunks
     match /knowledgeChunks/{chunkId} {
-      allow read: if isAdmin();
-      allow write: if false;
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
     }
 
-    // auditEvents
     match /auditEvents/{eventId} {
-      allow read: if isAdmin();
-      allow write: if false;
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
     }
 
-    // education
-    match /education/{articleId} {
-      allow read: if resource.data.isPublished == true || isAdmin();
-      allow write: if false;
-    }
-
-    // default-deny
+    // Default-deny untuk seluruh koleksi/path Firestore yang tidak disebut.
     match /{document=**} {
       allow read, write: if false;
     }

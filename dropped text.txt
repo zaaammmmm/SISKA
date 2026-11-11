@@ -1,0 +1,2 @@
+
+Sidebar hanya merender ikon dan label navigasi. Belum ada state yang mengambil count dan

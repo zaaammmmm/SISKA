@@ -102,6 +102,7 @@ export async function createReport(
     resolvedAt: null,
   };
 
+  const adminUsers = await db.collection('users').where('role', '==', 'admin').get();
   const batch = db.batch();
   batch.create(reportRef, reportData);
   batch.create(historyRef, {
@@ -111,6 +112,22 @@ export async function createReport(
     note: null,
     createdAt: now,
   });
+  for (const adminUser of adminUsers.docs) {
+    const notificationRef = db.collection('users').doc(adminUser.id)
+      .collection('notifications').doc();
+    batch.create(notificationRef, {
+      recipientUid: adminUser.id,
+      type: 'new_report_submitted',
+      title: 'Laporan Baru',
+      body: 'Ada laporan baru yang menunggu peninjauan.',
+      targetType: 'report',
+      targetId: reportRef.id,
+      isRead: false,
+      readAt: null,
+      createdAt: now,
+    });
+  }
+
   recordAuditEventInBatch(batch, {
     actorUid: authorized.uid,
     action: 'report.created',

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { collection, doc, onSnapshot, orderBy, query, where, type Unsubscribe } from "firebase/firestore";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, updateProfile } from "firebase/auth";
 import { auth, db } from "@/lib/firebase/client";
 import { AppShell } from "@/components/shell";
@@ -14,6 +14,7 @@ import {
   postConversationMessage, transitionReportStatusByAdmin,
   updateConversationStatusByAdmin, fetchMyProfile, updateMyProfileName,
   fetchKnowledgeDocumentsByAdmin, uploadKnowledgePdfByAdmin, deleteKnowledgeDocumentByAdmin, triggerKnowledgeReindexByAdmin, fetchAuditEventsByAdmin,
+  broadcastNotificationByAdmin,
 } from "@/lib/api-client";
 import type { SerializedReport, SerializedReportDetail, SerializedConversation, SerializedMessage, ReportsSummaryResult, SerializedKnowledgeDocument, SerializedAuditEvent } from "@/types/api";
 import { ALLOWED_STATUS_TRANSITIONS, isStatusNoteRequired, type ReportStatus } from "@/types/domain";
@@ -55,10 +56,21 @@ export function LiveNewReportPage() {
 }
 
 export function LiveHistoryPage({admin=false}:{admin?:boolean}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [rows,setRows]=useState<SerializedReport[]>([]); const [cursor,setCursor]=useState<string|null>(null); const [next,setNext]=useState<string|null>(null); const [status,setStatus]=useState(""); const [query,setQuery]=useState(""); const [error,setError]=useState(""); const [busy,setBusy]=useState(false);
   const load=useCallback(async(reset=true)=>{setBusy(true);setError("");try{const result=await fetchReportsPage({limit:20,status:status ? status as ReportStatus : undefined,cursor:reset?undefined:cursor});setRows(old=>reset?result.items:[...old,...result.items]);setNext(result.nextCursor);setCursor(result.nextCursor);}catch(e){setError(errorText(e));}finally{setBusy(false);}},[status,cursor]);
   useEffect(()=>{void load(true);},[status]);
   const filtered=useMemo(()=>rows.filter(r=>(r.id+r.category+r.description).toLowerCase().includes(query.toLowerCase())),[rows,query]);
+
+  useEffect(() => {
+    const targetReportId = searchParams.get("reportId");
+    if (!targetReportId) return;
+    const match = rows.find((row) => row.id === targetReportId);
+    if (!match) return;
+    router.replace(`${admin ? "/admin/reports/" : "/user/reports/"}${encodeURIComponent(match.id)}`);
+  }, [admin, router, rows, searchParams]);
+
   return <AppShell role={admin?"admin":"user"}><Head title={admin?"Kelola laporan":"Riwayat laporan"} subtitle={admin?"Daftar laporan yang dapat ditinjau petugas.":"Daftar laporan milik akunmu."} action={!admin?<Link href="/user/new-report" className="btn btn-primary">Buat laporan</Link>:undefined}/><div className="card filters"><label className="field"><span className="label">Cari laporan</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Nomor, kategori, deskripsi"/></label><label className="field"><span className="label">Status</span><select value={status} onChange={e=>{setStatus(e.target.value);setCursor(null);}}><option value="">Semua status</option>{Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><button className="btn btn-outline" onClick={()=>void load(true)} disabled={busy}>Terapkan / muat ulang</button></div>{error&&<Alert>{error}</Alert>}{busy&&<p className="help">Memuat…</p>}<ReportRows rows={filtered} admin={admin}/>{next&&<button className="btn btn-outline" disabled={busy} onClick={()=>void load(false)}>Muat berikutnya</button>}</AppShell>;
 }
 
@@ -83,6 +95,8 @@ function firestoreDate(value: unknown): string {
 }
 
 function ConversationChat({admin}:{admin:boolean}) {
+ const router = useRouter();
+ const searchParams = useSearchParams();
  const [conversations,setConversations]=useState<SerializedConversation[]>([]);
  const [active,setActive]=useState("");
  const [messages,setMessages]=useState<SerializedMessage[]>([]);
@@ -135,6 +149,7 @@ function ConversationChat({admin}:{admin:boolean}) {
      lastMessage:typeof data.lastMessage==="string"?data.lastMessage:null,
      lastMessageAt:data.lastMessageAt?firestoreDate(data.lastMessageAt):null,
      lastMessageSenderUid:typeof data.lastMessageSenderUid==="string"?data.lastMessageSenderUid:null,
+     unreadCount:0,
     });
 
     if(admin){
@@ -208,7 +223,7 @@ function ConversationChat({admin}:{admin:boolean}) {
   const unsubscribe=onSnapshot(messagesQuery,snapshot=>{
    const items=snapshot.docs.map(item=>{
     const data=item.data();
-    return {id:item.id,senderUid:String(data.senderUid??""),body:String(data.body??""),createdAt:firestoreDate(data.createdAt),attachmentPath:typeof data.attachmentPath==="string"?data.attachmentPath:null};
+    return {id:item.id,senderUid:String(data.senderUid??""),body:String(data.body??""),createdAt:firestoreDate(data.createdAt),attachmentPath:typeof data.attachmentPath==="string"?data.attachmentPath:null,readByRecipient:data.readByRecipient===true};
    });
    setMessages(items);
   },listenerError=>{
@@ -299,7 +314,67 @@ export function LiveUserChatPage(){return <ConversationChat admin={false}/>;}
 export function LiveAdminChatPage(){return <ConversationChat admin={true}/>;}
 export function LiveUserAiPage(){return <AppShell role="user"><Head title="Chatbot SISKA AI" subtitle="Asisten informasi umum berdasarkan knowledge base terverifikasi."/><AiChatPanel/></AppShell>;}
 
-export function LiveAdminDashboard(){const [summary,setSummary]=useState<ReportsSummaryResult|null>(null);const [rows,setRows]=useState<SerializedReport[]>([]);const [error,setError]=useState("");useEffect(()=>{Promise.all([fetchReportsSummary(),fetchReportsPage({limit:8})]).then(([s,r])=>{setSummary(s);setRows(r.items);}).catch(e=>setError(errorText(e)));},[]);return <AppShell role="admin"><Head title="Dashboard admin" subtitle="Ringkasan laporan aktual dari backend SISKA."/><div className="stats">{[{label:"Total laporan",value:summary?.total??0},...Object.entries(STATUS).map(([k,v])=>({label:v,value:summary?.byStatus[k as ReportStatus]??0}))].map(s=><div className="stat" key={s.label}><div className="stat-top">{s.label}</div><div className="stat-num">{s.value}</div></div>)}</div>{error&&<Alert>{error}</Alert>}<div className="section-head"><h2>Laporan terbaru</h2><Link href="/admin/reports" className="link-teal">Kelola semua</Link></div><ReportRows rows={rows} admin/></AppShell>;}
+export function LiveAdminDashboard(){
+  const [summary,setSummary]=useState<ReportsSummaryResult|null>(null);
+  const [rows,setRows]=useState<SerializedReport[]>([]);
+  const [error,setError]=useState("");
+  const [notice,setNotice]=useState("");
+  const [title,setTitle]=useState("Pembaruan SISKA");
+  const [body,setBody]=useState("");
+  const [targetType,setTargetType]=useState<"none"|"report"|"conversation"|"education">("none");
+  const [targetId,setTargetId]=useState("");
+  const [targetRole,setTargetRole]=useState<"reporter"|"all">("reporter");
+  const [sending,setSending]=useState(false);
+  const [history,setHistory]=useState<Array<{title:string;body:string;targetType:"none"|"report"|"conversation"|"education";targetRole:"reporter"|"all";sentAt:string;}>>([]);
+
+  const load = useCallback(async () => {
+    try {
+      setError("");
+      const [s, r] = await Promise.all([fetchReportsSummary(), fetchReportsPage({ limit: 8 })]);
+      setSummary(s);
+      setRows(r.items);
+    } catch (e) {
+      setError(errorText(e));
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function submitBroadcast(e: React.FormEvent) {
+    e.preventDefault();
+    setSending(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await broadcastNotificationByAdmin({
+        title: title.trim(),
+        body: body.trim(),
+        targetType,
+        targetId: targetId.trim() || null,
+        targetRole,
+      });
+      setNotice(`Broadcast berhasil dikirim ke ${result.sentCount} pengguna.`);
+      setHistory(current => [{
+        title: title.trim(),
+        body: body.trim(),
+        targetType,
+        targetRole,
+        sentAt: new Date().toISOString(),
+      }, ...current].slice(0, 5));
+      setTitle("Pembaruan SISKA");
+      setBody("");
+      setTargetType("none");
+      setTargetId("");
+      setTargetRole("reporter");
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return <AppShell role="admin"><Head title="Dashboard admin" subtitle="Ringkasan laporan aktual dari backend SISKA."/><div className="stats">{[{label:"Total laporan",value:summary?.total??0},...Object.entries(STATUS).map(([k,v])=>({label:v,value:summary?.byStatus[k as ReportStatus]??0}))].map(s=><div className="stat" key={s.label}><div className="stat-top">{s.label}</div><div className="stat-num">{s.value}</div></div>)}</div>{error&&<Alert>{error}</Alert>}{notice&&<p className="help" role="status">{notice}</p>}<div className="section-head"><h2>Laporan terbaru</h2><Link href="/admin/reports" className="link-teal">Kelola semua</Link></div><ReportRows rows={rows} admin/><section className="card" style={{marginTop:18,maxWidth:900}}><h2 className="card-title">Kirim broadcast ke pengguna</h2><form className="form-grid" onSubmit={submitBroadcast}><label className="field"><span className="label">Judul notifikasi *</span><input required minLength={3} maxLength={150} value={title} onChange={e=>setTitle(e.target.value)} placeholder="Pembaruan layanan SISKA"/></label><label className="field full"><span className="label">Isi pesan *</span><textarea className="textarea" required minLength={5} maxLength={1000} rows={5} value={body} onChange={e=>setBody(e.target.value)} placeholder="Informasikan update, pengingat, atau perubahan penting…"/></label><div className="form-grid" style={{gridTemplateColumns:"repeat(2,minmax(0,1fr))",width:"100%"}}><label className="field"><span className="label">Jenis target</span><select value={targetType} onChange={e=>setTargetType(e.target.value as "none"|"report"|"conversation"|"education")}><option value="none">Tanpa target</option><option value="report">Laporan</option><option value="conversation">Percakapan</option><option value="education">Edukasi</option></select></label><label className="field"><span className="label">Target audiens</span><select value={targetRole} onChange={e=>setTargetRole(e.target.value as "reporter"|"all")}><option value="reporter">Reporter saja</option><option value="all">Semua pengguna</option></select></label></div><label className="field full"><span className="label">ID target (opsional)</span><input value={targetId} onChange={e=>setTargetId(e.target.value)} placeholder="contoh: rpt_123 atau edu_456" disabled={targetType==="none"} maxLength={120}/></label><button className="btn btn-primary" disabled={sending||!title.trim()||!body.trim()}>{sending?"Mengirim…":"Kirim broadcast"}</button></form></section><section className="card" style={{marginTop:18,maxWidth:900}}><div className="section-head"><h2>Riwayat broadcast terbaru</h2><span className="chip">{history.length} item</span></div>{history.length===0?<p className="help">Belum ada broadcast yang dikirim pada sesi ini.</p>:<div className="stack">{history.map((item,index)=><div key={`${item.sentAt}-${index}`} className="help" style={{padding:"10px 12px",border:"1px solid var(--line)",borderRadius:10,display:"grid",gap:4}}><strong>{item.title}</strong><span>{item.body}</span><small>{new Date(item.sentAt).toLocaleString("id-ID", {dateStyle:"medium", timeStyle:"short"})} · {item.targetRole === "all" ? "Semua pengguna" : "Reporter saja"}{item.targetType !== "none" ? ` · ${item.targetType}` : ""}</small></div>)}</div>}</section></AppShell>;
+}
 
 
 export function LiveAdminDocumentsPage(){

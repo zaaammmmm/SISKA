@@ -32,7 +32,16 @@ export const INDISTINGUISHABLE_NOT_FOUND_MESSAGE =
 export function resolveConversationReporterId(
   conversation: Partial<ConversationDocument> & { reporterUid?: string | null },
 ): string {
-  return String(conversation.reporterId ?? conversation.reporterUid ?? '');
+  // Field kanonis menang bila memang ada, termasuk saat nilainya kosong/null.
+  // Alias hanya dipakai untuk dokumen legacy yang tidak memiliki reporterId.
+  const hasCanonicalField = Object.prototype.hasOwnProperty.call(
+    conversation,
+    'reporterId',
+  );
+  const raw = hasCanonicalField
+    ? conversation.reporterId
+    : conversation.reporterUid;
+  return typeof raw === 'string' ? raw : '';
 }
 
 /**
@@ -42,7 +51,15 @@ export function resolveConversationReporterId(
 export function resolveConversationAdminId(
   conversation: Partial<ConversationDocument> & { adminUid?: string | null },
 ): string | null {
-  const raw = conversation.assignedAdminId ?? conversation.adminUid ?? null;
+  // assignedAdminId adalah field kanonis. Nilai null secara eksplisit berarti
+  // belum ditugaskan dan tidak boleh ditimpa oleh alias adminUid yang stale.
+  const hasCanonicalField = Object.prototype.hasOwnProperty.call(
+    conversation,
+    'assignedAdminId',
+  );
+  const raw = hasCanonicalField
+    ? conversation.assignedAdminId
+    : conversation.adminUid ?? null;
   return typeof raw === 'string' && raw.trim().length > 0 ? raw : null;
 }
 

@@ -1,47 +1,16 @@
 rules_version = '2';
+
 service firebase.storage {
   match /b/{bucket}/o {
-    function signedIn() {
-      return request.auth != null;
-    }
-
-    function isAdmin() {
-      return signedIn() && request.auth.token.role == 'admin';
-    }
-
-    function isReportOwner(reportId) {
-      return signedIn() &&
-        firestore.exists(/databases/(default)/documents/reports/$(reportId)) &&
-        firestore.get(/databases/(default)/documents/reports/$(reportId)).data.reporterId == request.auth.uid;
-    }
-
-    function isAllowedEvidenceMime() {
-      return request.resource.contentType == 'application/pdf' ||
-        request.resource.contentType == 'image/jpeg' ||
-        request.resource.contentType == 'image/png';
-    }
-
-    // evidence
-    match /reports/{reportId}/evidence/{fileName} {
-      allow read: if isAdmin() || isReportOwner(reportId);
-      allow create: if isReportOwner(reportId)
-        && request.resource.size > 0
-        && request.resource.size <= 5 * 1024 * 1024
-        && isAllowedEvidenceMime();
-      allow update, delete: if false;
-    }
-
-    // knowledge-base
-    match /knowledge-base/{docId}/{fileName} {
-      allow read: if isAdmin();
-      allow create, update: if isAdmin()
-        && request.resource.size > 0
-        && request.resource.size <= 25 * 1024 * 1024
-        && request.resource.contentType == 'application/pdf';
-      allow delete: if isAdmin();
-    }
-
-    // default-deny
+    // SISKA tidak menggunakan Firebase Storage Client SDK untuk unggah/baca.
+    // Bukti dan PDF Knowledge Base diakses melalui Route Handler yang memeriksa
+    // role/ownership, lalu memakai Firebase Admin SDK atau Signed URL berumur
+    // singkat. Admin SDK dan Google Cloud Storage Signed URL tidak dievaluasi
+    // oleh Firebase Storage Security Rules.
+    //
+    // Karena itu, semua akses langsung dari Client SDK ditolak. Jangan membuka
+    // path tertentu tanpa merancang ulang validasi ukuran/MIME, metadata,
+    // checksum, audit, finalisasi upload, serta pengujian lintas akun.
     match /{allPaths=**} {
       allow read, write: if false;
     }

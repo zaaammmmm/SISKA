@@ -85,6 +85,7 @@ export type Conversation = {
   /** Metadata internal untuk pemetaan identitas dan pengurutan percakapan live. */
   reporterId?: string;
   sortTime?: number;
+  unreadCount?: number;
 };
 
 export const userConversations: Conversation[] = [

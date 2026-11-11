@@ -69,6 +69,7 @@ function serializeConversationDoc(
     lastMessageSenderUid:
       typeof data.lastMessageSenderUid === 'string' ? data.lastMessageSenderUid : null,
     lastMessageAt: data.lastMessageAt ? toIsoDateString(data.lastMessageAt) : null,
+    unreadCount: Number.isInteger(data.unreadCount) ? data.unreadCount : 0,
   };
 }
 
@@ -80,7 +81,28 @@ function serializeMessageDoc(id: string, data: DocumentData): SerializedMessage 
     createdAt: toIsoDateString(data.createdAt),
     attachmentPath:
       typeof data.attachmentPath === 'string' ? data.attachmentPath : null,
+    readByRecipient: data.readByRecipient === true,
   };
+}
+
+/**
+ * Menghitung pesan masuk yang belum dibaca berdasarkan receipt per UID.
+ * Receipt disimpan di conversations/{id}/readReceipts/{uid}, sehingga status baca
+ * admin yang berbeda tidak saling memengaruhi pada percakapan yang belum ditugaskan.
+ */
+async function getUnreadMessageCount(
+  conversationId: string,
+  uid: string,
+): Promise<number> {
+  const db = getAdminDb();
+  const conversationRef = db.collection('conversations').doc(conversationId);
+  const receiptSnap = await conversationRef.collection('readReceipts').doc(uid).get();
+  const readAt = receiptSnap.exists ? receiptSnap.get('readAt') : null;
+  const messagesRef = conversationRef.collection('messages');
+  let query = messagesRef.orderBy('createdAt', 'asc');
+  if (readAt) query = query.startAfter(readAt);
+  const snapshot = await query.get();
+  return snapshot.docs.filter((doc) => doc.get('senderUid') !== uid).length;
 }
 
 /**
@@ -103,10 +125,11 @@ export async function listConversations(
       .limit(50)
       .get();
 
-    return {
-      items: snap.docs.map((doc) => serializeConversationDoc(doc.id, doc.data())),
-      nextCursor: null,
-    };
+    const items = await Promise.all(snap.docs.map(async (doc) => ({
+      ...serializeConversationDoc(doc.id, doc.data()),
+      unreadCount: await getUnreadMessageCount(doc.id, authorized.uid),
+    })));
+    return { items, nextCursor: null };
   }
 
   // Untuk Admin: ambil percakapan yang ditugaskan ke admin ini + percakapan belum ditugaskan
@@ -134,10 +157,11 @@ export async function listConversations(
     b.updatedAt.localeCompare(a.updatedAt),
   );
 
-  return {
-    items: sorted,
-    nextCursor: null,
-  };
+  const items = await Promise.all(sorted.map(async (conversation) => ({
+    ...conversation,
+    unreadCount: await getUnreadMessageCount(conversation.id, authorized.uid),
+  })));
+  return { items, nextCursor: null };
 }
 
 /**
@@ -273,7 +297,32 @@ export async function listMessages(
     ? snapshot.docs.slice(0, pagination.limit)
     : snapshot.docs;
 
-  const items = pageDocs.map((doc) => serializeMessageDoc(doc.id, doc.data()));
+  const conversation = convData as ConversationDocument;
+  const recipientUid = caller.role === 'reporter'
+    ? resolveConversationAdminId(conversation)
+    : resolveConversationReporterId(conversation);
+  const receiptSnapshots = recipientUid
+    ? [await convRef.collection('readReceipts').doc(recipientUid).get()]
+    : caller.role === 'reporter'
+      ? (await convRef.collection('readReceipts').get()).docs
+      : [];
+  const recipientReadTimes = receiptSnapshots
+    .filter((receipt) => receipt.exists && receipt.id !== caller.uid)
+    .map((receipt) => receipt.get('readAt'))
+    .filter(Boolean)
+    .map((value) => typeof value.toMillis === 'function'
+      ? value.toMillis()
+      : new Date(value).getTime());
+  const items = pageDocs.map((doc) => {
+    const message = serializeMessageDoc(doc.id, doc.data());
+    const createdAt = doc.get('createdAt');
+    const createdAtMillis = createdAt && typeof createdAt.toMillis === 'function'
+      ? createdAt.toMillis()
+      : new Date(createdAt).getTime();
+    const readByRecipient = message.senderUid === caller.uid &&
+      recipientReadTimes.some((readAt) => readAt >= createdAtMillis);
+    return { ...message, readByRecipient };
+  });
   const nextCursor =
     hasMore && pageDocs.length > 0 ? pageDocs[pageDocs.length - 1].id : null;
 
@@ -306,6 +355,9 @@ export async function sendMessage(
       : null;
 
     const assignedAdminId = convData ? resolveConversationAdminId(convData) : null;
+    const unassignedAdminUsers = authorized.role === 'reporter' && !assignedAdminId
+      ? await tx.get(db.collection('users').where('role', '==', 'admin'))
+      : null;
 
     // Jika admin membalas percakapan yang belum ditugaskan (`assignedAdminId === null`),
     // klaim penugasan untuk admin tersebut; jika sudah ditugaskan ke admin lain atau tidak ada, assertCanAccessConversation akan menolak secara seragam (404).
@@ -349,15 +401,14 @@ export async function sendMessage(
     const recipientUid =
       authorized.role === 'reporter' ? assignedAdminId : reporterId;
 
-    if (recipientUid) {
-      const notifRef = db
-        .collection('users')
-        .doc(recipientUid)
-        .collection('notifications')
-        .doc();
-
+    const notificationRecipients = recipientUid
+      ? [recipientUid]
+      : (unassignedAdminUsers?.docs ?? []).map((adminUser) => adminUser.id);
+    for (const targetUid of notificationRecipients) {
+      const notifRef = db.collection('users').doc(targetUid)
+        .collection('notifications').doc();
       tx.set(notifRef, {
-        recipientUid,
+        recipientUid: targetUid,
         type: 'new_chat_message',
         title: 'Pesan Baru Diterima',
         body: 'Anda menerima pesan baru pada ruang percakapan SISKA.',
@@ -373,6 +424,48 @@ export async function sendMessage(
   });
 
   return createdMessage;
+}
+
+/**
+ * Menandai seluruh pesan masuk pada percakapan sebagai telah dibaca untuk UID caller.
+ * Receipt per pengguna menjaga isolasi status baca, termasuk chat admin yang belum ditugaskan.
+ */
+export async function markConversationAsRead(
+  caller: AuthenticatedCaller,
+  conversationId: string,
+): Promise<{ conversationId: string; readAt: string }> {
+  const db = getAdminDb();
+  const conversationRef = db.collection('conversations').doc(conversationId);
+  const conversationSnap = await conversationRef.get();
+  const conversation = conversationSnap.exists
+    ? conversationSnap.data() as ConversationDocument
+    : null;
+  assertCanAccessConversation(caller, conversation, 'read');
+  const now = new Date();
+  await conversationRef.collection('readReceipts').doc(caller.uid).set({
+    uid: caller.uid,
+    readAt: now,
+    updatedAt: now,
+  }, { merge: true });
+
+  // Notifikasi untuk percakapan yang sama ikut menjadi read ketika ruang chat dibuka.
+  const relatedNotifications = await db.collection('users').doc(caller.uid)
+    .collection('notifications')
+    .where('targetId', '==', conversationId)
+    .get();
+  const unreadConversationNotifications = relatedNotifications.docs.filter(
+    (notification) => notification.get('targetType') === 'conversation' &&
+      notification.get('isRead') === false,
+  );
+  for (let offset = 0; offset < unreadConversationNotifications.length; offset += 400) {
+    const batch = db.batch();
+    for (const notification of unreadConversationNotifications.slice(offset, offset + 400)) {
+      batch.update(notification.ref, { isRead: true, readAt: now });
+    }
+    await batch.commit();
+  }
+
+  return { conversationId, readAt: now.toISOString() };
 }
 
 /**

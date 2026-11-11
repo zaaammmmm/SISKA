@@ -171,8 +171,11 @@ export async function getUnreadNotificationCount(
     .where('isRead', '==', false)
     .get();
 
+  const unreadDocs = snapshot.docs;
   return {
-    unreadCount: snapshot.docs.length,
+    unreadCount: unreadDocs.length,
+    unreadReportCount: unreadDocs.filter((doc) => doc.data()?.targetType === 'report').length,
+    unreadConversationCount: unreadDocs.filter((doc) => doc.data()?.targetType === 'conversation').length,
   };
 }
 
@@ -234,16 +237,19 @@ export async function markAllNotificationsAsRead(
   }
 
   const now = new Date();
-  const batch = db.batch();
-
-  for (const doc of snapshot.docs) {
-    batch.update(doc.ref, {
-      isRead: true,
-      readAt: now,
-    });
+  // Firestore membatasi maksimal 500 operasi per batch. Pecah menjadi
+  // chunk 400 agar mark-all tetap berhasil untuk akun dengan notifikasi banyak.
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < snapshot.docs.length; i += CHUNK_SIZE) {
+    const batch = db.batch();
+    for (const doc of snapshot.docs.slice(i, i + CHUNK_SIZE)) {
+      batch.update(doc.ref, {
+        isRead: true,
+        readAt: now,
+      });
+    }
+    await batch.commit();
   }
-
-  await batch.commit();
 
   return { markedCount: snapshot.docs.length };
 }

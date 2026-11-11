@@ -5,7 +5,7 @@ import { FileText, Paperclip, Search, Send, X, Headset, User } from "lucide-reac
 import type { Conversation } from "@/lib/demo-data";
 import { fileMeta } from "@/components/ui";
 import { auth, db } from "@/lib/firebase";
-import { openConversation, postConversationMessage } from "@/lib/api-client";
+import { fetchConversationMessages, fetchConversations, markConversationAsRead, openConversation, postConversationMessage } from "@/lib/api-client";
 import {
   collection,
   doc,
@@ -21,6 +21,7 @@ import {
 export type Msg = {
   id: string; from: "me" | "them"; author: string; time: string; text: string;
   attachment?: { name: string; meta: string };
+  readByRecipient?: boolean;
 };
 
 type Header = { icon: LucideIcon; title: string; subtitle: string; chip: React.ReactNode };
@@ -94,6 +95,8 @@ function mapConversation(
     kind: "direct",
     reporterId,
     sortTime: timestampMillis(data.updatedAt),
+    unreadCount: Number.isFinite(Number(data.unreadCount)) ? Number(data.unreadCount) : 0,
+    badge: Number(data.unreadCount) > 0 ? `${Number(data.unreadCount) > 99 ? "99+" : Number(data.unreadCount)} belum dibaca` : undefined,
   };
 }
 
@@ -242,6 +245,66 @@ export function ChatWorkspace({
     };
   }, [liveRole]);
 
+  // Ambil unreadCount dari API terotorisasi. Listener Firestore tetap dipakai untuk
+  // daftar chat realtime, sedangkan API menjadi sumber kebenaran status baca per UID.
+  useEffect(() => {
+    if (!liveRole) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const refreshUnread = async () => {
+      try {
+        const result = await fetchConversations();
+        if (cancelled) return;
+        const unreadById = new Map(result.items.map((item) => [item.id, item.unreadCount ?? 0]));
+        setLiveConversations((current) => current.map((conversation) => {
+          const unreadCount = unreadById.get(conversation.id) ?? 0;
+          return {
+            ...conversation,
+            unreadCount,
+            badge: unreadCount > 0 ? `${unreadCount > 99 ? "99+" : unreadCount} belum dibaca` : undefined,
+          };
+        }));
+      } catch {
+        // Pertahankan nilai terakhir jika API sementara tidak tersedia.
+      }
+    };
+    void refreshUnread();
+    timer = setInterval(() => void refreshUnread(), 15_000);
+    const onFocus = () => void refreshUnread();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [liveRole]);
+
+  // Membuka percakapan menandai seluruh pesan masuk sebagai dibaca khusus untuk UID ini.
+  useEffect(() => {
+    if (!liveRole || !active || !activeConversation) return;
+    let cancelled = false;
+    setLiveConversations((current) => current.map((conversation) =>
+      conversation.id === active
+        ? { ...conversation, unreadCount: 0, badge: undefined }
+        : conversation,
+    ));
+    void markConversationAsRead(active).then(() => {
+      if (cancelled) return;
+      // Segarkan status agar badge pada sidebar/header konsisten dengan server.
+      void fetchConversations().then((result) => {
+        if (cancelled) return;
+        const unreadById = new Map(result.items.map((item) => [item.id, item.unreadCount ?? 0]));
+        setLiveConversations((current) => current.map((conversation) => {
+          const unreadCount = unreadById.get(conversation.id) ?? 0;
+          return { ...conversation, unreadCount, badge: unreadCount > 0 ? `${unreadCount > 99 ? "99+" : unreadCount} belum dibaca` : undefined };
+        }));
+      }).catch(() => undefined);
+    }).catch((error) => {
+      if (!cancelled) setLiveError(error instanceof Error ? error.message : "Status baca percakapan gagal diperbarui.");
+    });
+    return () => { cancelled = true; };
+  }, [liveRole, active, activeConversation?.id]);
+
   // Listener pesan aktif. Pesan baru tampil otomatis tanpa polling maupun refresh.
   useEffect(() => {
     if (!liveRole || !active || !db || !currentUid) return;
@@ -266,8 +329,48 @@ export function ChatWorkspace({
         };
       });
       setThreads((current) => ({ ...current, [active]: next }));
+      // API mengembalikan readByRecipient berdasarkan receipt lawan bicara.
+      void fetchConversationMessages(active, { limit: 100 }).then((result) => {
+        const readState = new Map(result.items.map((message) => [message.id, message.readByRecipient]));
+        setThreads((current) => ({
+          ...current,
+          [active]: (current[active] ?? next).map((message) => ({
+            ...message,
+            readByRecipient: readState.get(message.id) ?? false,
+          })),
+        }));
+      }).catch(() => undefined);
     }, (error) => setLiveError(`Gagal menerima pesan real-time: ${error.message}`));
   }, [liveRole, active, currentUid, meLabel, activeConversation?.reporterId, reporterNamesVersion]);
+
+  // Perbarui indikator "Dibaca" pada pesan terkirim ketika peserta lain membuka chat.
+  useEffect(() => {
+    if (!liveRole || !active) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const refreshReadState = async () => {
+      try {
+        const result = await fetchConversationMessages(active, { limit: 100 });
+        if (cancelled) return;
+        const readState = new Map(result.items.map((message) => [message.id, message.readByRecipient]));
+        setThreads((current) => ({
+          ...current,
+          [active]: (current[active] ?? []).map((message) => ({
+            ...message,
+            readByRecipient: readState.get(message.id) ?? false,
+          })),
+        }));
+      } catch {
+        // Status terakhir tetap ditampilkan jika refresh gagal.
+      }
+    };
+    void refreshReadState();
+    timer = setInterval(() => void refreshReadState(), 15_000);
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [liveRole, active]);
 
   // jaga agar percakapan aktif selalu ada pada daftar yang sedang difilter
   useEffect(() => {
@@ -358,6 +461,7 @@ export function ChatWorkspace({
             <div key={m.id} className={`bubble ${m.from}`}>
               <div className="who">{m.author}<span>{m.time}</span></div>
               {m.text}
+              {m.from === "me" && liveRole && <small className="message-read-state">{m.readByRecipient ? "Dibaca" : "Terkirim"}</small>}
               {m.attachment && <div className="att"><FileText aria-hidden />{m.attachment.name}</div>}
             </div>
           ))}

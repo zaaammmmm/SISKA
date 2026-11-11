@@ -6,7 +6,7 @@ const cspDirectives = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://*.googleapis.com https://*.firebasestorage.app http://127.0.0.1:9199 http://localhost:9199",
   "font-src 'self' data:",
-  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebasestorage.app wss://*.firebaseio.com http://127.0.0.1:8080 http://127.0.0.1:9099 http://127.0.0.1:9199 http://localhost:8080 http://localhost:9099 http://localhost:9199",
+  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebasestorage.app wss://*.firebaseio.com http://127.0.0.1:8085 http://127.0.0.1:9099 http://127.0.0.1:9199 http://localhost:8085 http://localhost:9099 http://localhost:9199",
   "frame-src 'self' https://*.firebaseapp.com http://127.0.0.1:9099 http://localhost:9099",
   "object-src 'none'",
   "base-uri 'self'",
