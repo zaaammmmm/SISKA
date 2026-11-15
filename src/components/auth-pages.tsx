@@ -9,7 +9,7 @@
  */
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import {
   browserLocalPersistence,
@@ -99,11 +99,13 @@ function AuthLayout({
 
 export function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const requiresLogin = searchParams.get('status') === 'login-required';
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -158,6 +160,11 @@ export function LoginPage() {
   return (
     <AuthLayout crumb="Masuk">
       <form className="auth-form" onSubmit={handleSubmit} noValidate={false}>
+        {requiresLogin && (
+          <p className="alert" role="alert">
+            Status: Anda harus login untuk membuat laporan.
+          </p>
+        )}
         <h2>Selamat datang kembali</h2>
         <p className="sub">Masuk untuk melanjutkan langkahmu bersama SISKA.</p>
         <TextField

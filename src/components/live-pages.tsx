@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, onSnapshot, orderBy, query, where, type Unsubscribe } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
-import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, updateProfile } from "firebase/auth";
+import { EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, updatePassword, updateProfile } from "firebase/auth";
 import { auth, db } from "@/lib/firebase/client";
 import { AppShell } from "@/components/shell";
 import { AiChatPanel } from "@/components/ai-chat";
@@ -108,6 +108,17 @@ export function LiveNewReportPage() {
   const router = useRouter();
   const [category,setCategory]=useState(""); const [incidentAt,setIncidentAt]=useState(""); const [location,setLocation]=useState(""); const [description,setDescription]=useState("");
   const [files,setFiles]=useState<File[]>([]); const [busy,setBusy]=useState(false); const [error,setError]=useState(""); const [createdId,setCreatedId]=useState("");
+
+  useEffect(() => {
+    if (!auth) return;
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        router.replace("/login?status=login-required");
+      }
+    });
+    return () => unsubscribe();
+  }, [router]);
+
   async function submit(e: React.FormEvent) { e.preventDefault(); setBusy(true); setError(""); try { const report=await submitNewReport({category,incidentAt:incidentAt?new Date(incidentAt).toISOString():null,location:location.trim()||null,description}); setCreatedId(report.id); for (const file of files) await uploadEvidenceMultipart(report.id,file); router.push(`/user/reports/${encodeURIComponent(report.id)}`); } catch(e) { setError(errorText(e)); } finally { setBusy(false); } }
   function addFiles(list: FileList|null) { if(!list)return; const accepted=Array.from(list); const invalid=accepted.find(f=>!(["application/pdf","image/jpeg","image/png"].includes(f.type))||f.size>5*1024*1024); if(invalid){setError(`${invalid.name}: format harus PDF/JPG/PNG dan ukuran maksimal 5 MiB.`);return;} setFiles(old=>[...old,...accepted]); }
   return (

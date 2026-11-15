@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { signOut } from "firebase/auth";
 import {
-  BookOpen, Bot, ChevronDown, Copy, FilePlus2, Headset, LayoutGrid, LogOut, Menu, FileText,
+  Bot, ChevronDown, Copy, FilePlus2, Headset, LayoutGrid, LogOut, Menu, FileText,
   MessagesSquare, SlidersHorizontal, UserRound,
 } from "lucide-react";
 import { Logo } from "@/components/logo";
@@ -23,7 +23,6 @@ const NAV = {
     { href: "/user/reports", label: "Riwayat laporan", icon: Copy },
     { href: "/user/chat", label: "Chat dengan Admin", icon: Headset },
     { href: "/user/ai", label: "SISKA AI", icon: Bot },
-    { href: "/education", label: "Edukasi", icon: BookOpen },
     { href: "/user/profile", label: "Profil dan pengaturan", icon: SlidersHorizontal },
   ],
   admin: [
