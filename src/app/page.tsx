@@ -1,103 +1,126 @@
 import Link from "next/link";
-import { ArrowRight, Bot, FilePlus2, HeartHandshake, ShieldCheck, FileText } from "lucide-react";
-import { Logo } from "@/components/logo";
+import { TriangleAlert } from "lucide-react";
+import { PublicFooter, PublicHeader } from "@/components/public-chrome";
 
-const features = [
-  { icon: FileText, title: "Pelaporan yang terarah", body: "Susun laporan dengan panduan yang jelas. Detail tambahan dapat dibagikan saat kamu siap.", cta: "Mulai Buat Laporan", href: "/user/new-report" },
-  { icon: HeartHandshake, title: "Pendampingan psikologis", body: "Kenali pilihan dukungan profesional. Hubungi petugas untuk informasi layanan yang tersedia.", cta: "Pelajari Pendampingan", href: "/education" },
-  { icon: Bot, title: "Butuh Informasi Awal?", body: "Tanyakan alur layanan dan penggunaan SISKA. AI bukan pengganti pendamping profesional.", cta: "Tanya SISKA AI", href: "/user/ai" },
+const facts = [
+  "Hanya kategori dan kronologi yang wajib diisi",
+  "Belum terkirim sampai kamu menekan Kirim",
+  "Status bisa dipantau kapan saja",
 ];
 
-const steps = [
-  { t: "Siapkan akun", d: "Daftar dan masuk ke ruang pengguna." },
-  { t: "Tulis informasi awal", d: "Isi yang kamu ingat; simpan draft bila perlu." },
-  { t: "Pantau tindak lanjut", d: "Lihat status dan hubungi petugas." },
+const previewSteps = [
+  { label: "Menunggu tinjauan", state: "done" },
+  { label: "Dalam peninjauan", state: "now" },
+  { label: "Dalam proses", state: "" },
+  { label: "Selesai", state: "" },
+];
+
+const statuses = [
+  { label: "Menunggu tinjauan", tone: "amber", body: "Laporanmu sudah masuk dan belum dibuka petugas." },
+  { label: "Dalam peninjauan", tone: "blue", body: "Petugas membaca dan memeriksa isi laporan." },
+  { label: "Dalam proses", tone: "teal", body: "Tindak lanjut sedang dijalankan." },
+  { label: "Selesai", tone: "green", body: "Proses selesai. Catatan akhir ada di riwayat laporan." },
 ];
 
 export default function Home() {
   return (
     <>
-      <header className="pub-header">
-        <div className="pub-header-in">
-          <div><Logo size={38} /></div>
-          <nav className="pub-nav" aria-label="Menu utama">
-            <Link href="/" className="active">Beranda</Link>
-            <Link href="/layanan">Layanan</Link>
-            <Link href="/education">Edukasi</Link>
-            <Link href="/about">Tentang</Link>
-          </nav>
-          <div className="pub-cta">
-            <Link href="/login" className="login">Login</Link>
-            <Link href="/register" className="btn btn-primary" style={{ height: 35 }}>Register</Link>
-          </div>
-        </div>
-      </header>
-
-      <main className="landing">
+      <PublicHeader active="home" />
+      <main id="isi">
         <div className="pub-wrap">
-          <section className="hero">
-            <div style={{ paddingTop: 3.5 }}>
-              <div className="eyebrow">SISKA • Sistem Informasi Pengaduan Kekerasan Seksual</div>
-              <h1>Kamu berhak didengar.<br />Mulai sesuai kenyamananmu.</h1>
-              <p className="lead">Sampaikan laporan, pahami pilihan layanan, dan temukan dukungan. Tidak perlu menceritakan lebih dari yang kamu siap bagikan.</p>
+          <section className="hero" aria-labelledby="judul">
+            <div>
+              <h1 id="judul">Kamu berhak didengar. Mulai sesuai kenyamananmu.</h1>
+              <p className="lead">
+                Sampaikan laporan, pahami pilihan layanan, dan cari dukungan. Kamu tidak perlu menceritakan lebih dari yang siap kamu bagikan.
+              </p>
               <div className="hero-actions">
-                <Link href="/user/new-report" className="btn btn-primary"><FilePlus2 aria-hidden /> Buat Laporan</Link>
-                <Link href="/layanan" className="btn btn-outline">Pelajari Layanan</Link>
+                <Link href="/user/new-report" className="btn btn-primary">Buat laporan</Link>
+                <Link href="/education" className="btn btn-outline">Baca dulu</Link>
               </div>
+              <ul className="hero-facts">
+                {facts.map((f) => <li key={f}>{f}</li>)}
+              </ul>
             </div>
-            <aside className="hero-card">
-              <HeartHandshake className="big" aria-hidden />
-              <h3>Satu langkah, satu pilihan.</h3>
-              <p>Kamu menentukan kapan memulai dan informasi apa yang ingin dibagikan.</p>
-              <span className="chip">Layanan pengaduan</span>
+
+            <aside className="preview" aria-label="Contoh tampilan status laporan">
+              <span className="preview-tag">Contoh tampilan</span>
+              <div className="preview-head">
+                <div>
+                  <b>SK-2611-0042</b>
+                  <small>Status laporan</small>
+                </div>
+                <span className="pill blue">Dalam peninjauan</span>
+              </div>
+              <ol className="mini-steps">
+                {previewSteps.map((s) => (
+                  <li key={s.label} className={s.state}>{s.label}</li>
+                ))}
+              </ol>
+              <div className="preview-msg">
+                <b>Pesan dari petugas</b>
+                Laporanmu sedang kami baca. Kamu bisa membalas di sini kapan pun siap.
+              </div>
             </aside>
           </section>
 
-          <section id="layanan" className="feature-cards" aria-label="Layanan">
-            {features.map((f) => (
-              <article className="feature" key={f.title}>
-                <div className="feature-head"><f.icon aria-hidden /><h3>{f.title}</h3></div>
-                <p>{f.body}</p>
-                <Link href={f.href} className="link-arrow"><ArrowRight aria-hidden /> {f.cta}</Link>
-              </article>
-            ))}
-          </section>
-
-          <div className="steps-head">
-            <h2>Cara memulai laporan</h2>
-            <span>Ikuti langkahnya sesuai kesiapanmu.</span>
-          </div>
-          <ol className="steps" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {steps.map((s, i) => (
-              <li className="step" key={s.t}>
-                <span className="step-no">{i + 1}</span>
-                <div><b>{s.t}</b><span>{s.d}</span></div>
-              </li>
-            ))}
-          </ol>
-          <div className="privacy">
-            <ShieldCheck aria-hidden />
+          <div className="note note-warn" role="note">
+            <TriangleAlert aria-hidden />
             <div>
-              <b>Privasi dimulai dari pilihanmu.</b>
-              <span>Bagikan hanya data yang diperlukan. Kebijakan akses dan penyimpanan perlu ditinjau institusi sebelum layanan digunakan.</span>
+              <b>SISKA bukan layanan darurat.</b>
+              Jika kamu dalam bahaya sekarang, menjauhlah ke tempat aman dan hubungi layanan darurat setempat.
             </div>
           </div>
+
+          <section className="bento" aria-label="Cara memakai SISKA">
+            <article className="tile tile-dark w7">
+              <h3>Melapor dengan caramu</h3>
+              <p>Tulis laporan lewat formulir yang jelas. Kamu menentukan seberapa banyak yang ingin dibagikan; bukti pendukung boleh ditambahkan nanti.</p>
+              <Link href="/user/new-report" className="btn btn-primary">Buat laporan</Link>
+            </article>
+            <article className="tile w5">
+              <h3>Bertanya dulu</h3>
+              <p>Tanyakan alur layanan ke SISKA AI, atau kirim pesan ke petugas setelah masuk. SISKA AI bukan pengganti pendamping profesional.</p>
+              <Link href="/user/ai" className="link-teal">Tanya SISKA AI</Link>
+            </article>
+            <article className="tile tile-tint w5">
+              <h3>Memahami hakmu</h3>
+              <p>Baca materi tentang bentuk kekerasan, batas pribadi, dan pilihan dukungan profesional.</p>
+              <Link href="/education" className="link-teal">Buka materi edukasi</Link>
+            </article>
+            <article className="tile w7">
+              <h3>Bagikan seperlunya</h3>
+              <p>Hindari menuliskan kata sandi atau data pihak lain yang tidak diperlukan. Kebijakan akses dan penyimpanan data mengikuti ketentuan institusi.</p>
+              <Link href="/register/terms" className="link-teal">Baca syarat dan ketentuan</Link>
+            </article>
+          </section>
+
+          <section className="steps-section" aria-labelledby="setelah">
+            <h2 id="setelah" className="section-title">Setelah laporan dikirim</h2>
+            <p className="section-sub">Kamu bisa melihat status laporan kapan saja. Setiap perubahan tercatat di riwayat, beserta catatan petugas bila ada.</p>
+            <ol className="flow">
+              {statuses.map((s) => (
+                <li key={s.label}>
+                  <span className={`pill ${s.tone}`}>{s.label}</span>
+                  <p>{s.body}</p>
+                </li>
+              ))}
+            </ol>
+          </section>
+
+          <section className="cta-band" aria-label="Mulai">
+            <div>
+              <h2>Mulai kapan pun kamu siap.</h2>
+              <p>Membuat akun tidak mengharuskanmu langsung melapor. Kamu bisa masuk, melihat-lihat, dan melanjutkan nanti.</p>
+            </div>
+            <div className="row">
+              <Link href="/register" className="btn btn-primary">Buat akun</Link>
+              <Link href="/login" className="btn btn-outline">Masuk</Link>
+            </div>
+          </section>
         </div>
       </main>
-
-      <footer className="pub-footer">
-        <div className="pub-wrap pub-footer-in">
-          <div><Logo size={19} /><small>SISKA • bukan layanan darurat.</small></div>
-          <div>
-            <h4>Kontak &amp; bantuan</h4>
-            <p>Chat dengan Admin setelah login • Kontak resmi akan ditambahkan oleh institusi.</p>
-          </div>
-          <nav aria-label="Tautan footer">
-            <Link href="/user/education">Panduan layanan</Link>
-            <Link href="/about">Tentang SISKA</Link>
-          </nav>
-        </div>
-      </footer>
+      <PublicFooter />
     </>
   );
 }

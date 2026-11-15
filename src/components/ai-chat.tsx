@@ -244,8 +244,8 @@ export function AiChatPanel() {
         <div className="chat-head">
           <Bot aria-hidden />
           <div className="t">
-            <b>SISKA AI • Asisten informasi</b>
-            <small>Untuk pertanyaan umum tentang alur dan layanan SISKA</small>
+            <b>SISKA AI</b>
+            <small>Asisten informasi umum. Bukan pengganti pendamping profesional.</small>
           </div>
           <button
             type="button"
@@ -261,7 +261,7 @@ export function AiChatPanel() {
         <div className="chat-body" ref={bodyRef} aria-live="polite">
           {messages.length === 0 && sessionReady && (
             <div className="ai-chat-empty">
-              <p className="help">
+              <p>
                 Halo, saya SISKA AI. Tanyakan informasi umum tentang alur
                 pelaporan atau layanan yang tersedia.
               </p>
@@ -294,7 +294,7 @@ export function AiChatPanel() {
           {loading && (
             <div className="bubble them" role="status">
               <div className="who">SISKA AI</div>
-              Mengetik…
+              Sedang menulis jawaban…
             </div>
           )}
         </div>
@@ -305,7 +305,7 @@ export function AiChatPanel() {
               type="text"
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              placeholder="Tanyakan informasi umum..."
+              placeholder="Tanyakan informasi umum"
               aria-label="Tulis pertanyaan untuk SISKA AI"
               maxLength={4000}
               disabled={loading || !sessionReady}
@@ -314,7 +314,6 @@ export function AiChatPanel() {
               className="btn btn-primary btn-sm"
               type="submit"
               disabled={loading || !sessionReady || !input.trim()}
-              style={{ height: 36 }}
             >
               <Send aria-hidden />
               Kirim
@@ -326,7 +325,7 @@ export function AiChatPanel() {
             </p>
           )}
           <p className="help">
-            Jangan masukkan nama, kronologi rinci, atau data pribadi.
+            Jangan masukkan nama, kronologi rinci, atau data pribadi. Untuk hal itu, gunakan laporan atau Chat dengan Admin.
           </p>
         </form>
       </section>

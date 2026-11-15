@@ -23,7 +23,6 @@ import {
 } from 'firebase/auth';
 import {
   ArrowLeft,
-  Check,
   KeyRound,
   Mail,
   MailCheck,
@@ -31,6 +30,7 @@ import {
   User,
 } from 'lucide-react';
 import { Logo } from '@/components/logo';
+import { QuickExit } from '@/components/quick-exit';
 import { Note, PasswordField, TextField } from '@/components/ui';
 import { auth } from '@/lib/firebase';
 import {
@@ -57,38 +57,33 @@ function AuthLayout({
   return (
     <div className="auth">
       <aside className="auth-aside">
-        <Logo size={32} tone="white" />
-        <div className="auth-aside-mid">
-          <span className="auth-badge">SISTEM INFORMASI PENGADUAN</span>
-          <h1>
-            Langkah kecilmu,
-            <br />
-            berarti.
-          </h1>
+        <Logo size={40} tone="white" />
+        <div>
+          <h1>Langkah kecilmu, berarti.</h1>
           <p className="lead">
             Ruang untuk menyampaikan laporan dan mencari informasi dukungan,
             sesuai kenyamananmu.
           </p>
           <ul className="auth-points">
             {AUTH_HIGHLIGHTS.map((point) => (
-              <li key={point}>
-                <Check aria-hidden /> {point}
-              </li>
+              <li key={point}>{point}</li>
             ))}
           </ul>
         </div>
-        <div className="auth-aside-foot">
-          SISKA • layanan pengaduan
-          <br />
-          SISKA bukan layanan darurat.
-        </div>
+        <p className="auth-aside-foot">
+          SISKA bukan layanan darurat. Jika kamu dalam bahaya sekarang,
+          hubungi layanan darurat setempat.
+        </p>
       </aside>
-      <main className="auth-main">
+      <main id="isi" className="auth-main">
         <div className="auth-top">
-          <Link href="/">
-            <ArrowLeft aria-hidden /> Kembali ke Beranda
+          <Link href="/" className="back">
+            <ArrowLeft size={16} aria-hidden /> Kembali ke beranda
           </Link>
-          <span className="crumb-tiny">{crumb}</span>
+          <div className="auth-top-right">
+            <span className="where">{crumb}</span>
+            <QuickExit />
+          </div>
         </div>
         <div className="auth-center">{children}</div>
         <p className="auth-foot">
@@ -161,7 +156,7 @@ export function LoginPage() {
   }
 
   return (
-    <AuthLayout crumb="User Pages / Login">
+    <AuthLayout crumb="Masuk">
       <form className="auth-form" onSubmit={handleSubmit} noValidate={false}>
         <h2>Selamat datang kembali</h2>
         <p className="sub">Masuk untuk melanjutkan langkahmu bersama SISKA.</p>
@@ -196,20 +191,20 @@ export function LoginPage() {
           <Link
             href="/login/forget"
             className="link-teal"
-            style={{ fontSize: 11 }}
+            
           >
-            Lupa Password?
+            Lupa password?
           </Link>
         </div>
         <button
           className="btn btn-primary"
           disabled={busy}
-          style={{ minWidth: 80 }}
+          
         >
-          {busy ? 'Memproses…' : 'Login'}
+          {busy ? 'Memproses…' : 'Masuk'}
         </button>
         <p className="auth-alt">
-          Belum punya akun? <Link href="/register">Register</Link>
+          Belum punya akun? <Link href="/register">Daftar</Link>
         </p>
       </form>
     </AuthLayout>
@@ -306,7 +301,7 @@ export function RegisterPage() {
   }
 
   return (
-    <AuthLayout crumb="User Pages / Register">
+    <AuthLayout crumb="Daftar">
       <form className="auth-form" onSubmit={handleSubmit}>
         <h2>Buat akun SISKA</h2>
         <p className="sub">Gunakan username yang nyaman untukmu.</p>
@@ -349,7 +344,7 @@ export function RegisterPage() {
           onChange={handleFieldChange('confirm')}
           error={errors.confirm}
         />
-        <div style={{ margin: '19px 0' }}>
+        <div style={{ margin: '24px 0' }}>
           <label className="check">
             <input
               type="checkbox"
@@ -373,7 +368,7 @@ export function RegisterPage() {
           <p
             className="error-text"
             role="alert"
-            style={{ margin: '-7px 0 12px' }}
+            style={{ margin: '12px 0 0' }}
           >
             {errors.form}
           </p>
@@ -381,12 +376,12 @@ export function RegisterPage() {
         <button
           className="btn btn-primary"
           disabled={busy}
-          style={{ minWidth: 80 }}
+          
         >
           {busy ? 'Memproses…' : 'Daftar'}
         </button>
         <p className="auth-alt">
-          Sudah punya akun? <Link href="/login">Login</Link>
+          Sudah punya akun? <Link href="/login">Masuk</Link>
         </p>
       </form>
     </AuthLayout>
@@ -426,7 +421,7 @@ export function ForgotPage() {
 
   if (sent) {
     return (
-      <AuthLayout crumb="User Pages / Konfirmasi">
+      <AuthLayout crumb="Konfirmasi">
         <div className="auth-form">
           <MailCheck className="auth-icon auth-icon-lg" aria-hidden />
           <h2>Periksa kotak masukmu</h2>
@@ -439,7 +434,7 @@ export function ForgotPage() {
           </Note>
           <div className="auth-actions">
             <Link href="/login" className="btn btn-primary">
-              Kembali ke Login
+              Kembali ke halaman masuk
             </Link>
             <button
               type="button"
@@ -455,7 +450,7 @@ export function ForgotPage() {
   }
 
   return (
-    <AuthLayout crumb="User Pages / Lupa Password">
+    <AuthLayout crumb="Lupa password">
       <form className="auth-form" onSubmit={handleSubmit}>
         <KeyRound className="auth-icon" aria-hidden />
         <h2>Lupa password?</h2>
@@ -479,14 +474,13 @@ export function ForgotPage() {
         </Note>
         <div className="auth-actions">
           <button className="btn btn-primary" disabled={busy}>
-            {busy ? 'Memproses…' : 'Kirim Instruksi'}
+            {busy ? 'Memproses…' : 'Kirim instruksi'}
           </button>
           <Link
             href="/login"
             className="link-arrow"
-            style={{ paddingLeft: 12 }}
           >
-            <ArrowLeft aria-hidden /> Kembali ke Login
+            <ArrowLeft aria-hidden /> Kembali ke halaman masuk
           </Link>
         </div>
       </form>

@@ -205,7 +205,7 @@ export function NotificationCenter({ role }: { role: "user" | "admin" }) {
       </button>
 
       {open && (
-        <div className="notification-panel" role="menu" aria-label="Notifikasi SISKA">
+        <div className="notification-panel" role="region" aria-label="Notifikasi SISKA">
           <div className="notification-header">
             <div>
               <strong>Notifikasi</strong>

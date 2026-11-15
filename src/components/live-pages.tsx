@@ -23,16 +23,47 @@ const STATUS: Record<ReportStatus, string> = {
   submitted: "Menunggu tinjauan", under_review: "Dalam peninjauan", in_progress: "Dalam proses", resolved: "Selesai", rejected: "Ditolak",
 };
 const STATUS_CLASS: Record<ReportStatus, string> = {
-  submitted: "amber", under_review: "blue", in_progress: "blue", resolved: "green", rejected: "red",
+  submitted: "amber", under_review: "blue", in_progress: "teal", resolved: "green", rejected: "plum",
 };
 const dateText = (value?: string | null) => value ? new Date(value).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "Tidak dicantumkan";
 const errorText = (e: unknown) => e instanceof SiskaApiClientError ? e.message : "Permintaan gagal. Periksa koneksi dan coba kembali.";
 function Head({ title, subtitle, action }: { title: string; subtitle: string; action?: React.ReactNode }) { return <div className="page-head"><div><h1>{title}</h1><p>{subtitle}</p></div>{action}</div>; }
-function Alert({ children }: { children: React.ReactNode }) { return <p className="error-text" role="alert">{children}</p>; }
+function Alert({ children }: { children: React.ReactNode }) { return <p className="alert" role="alert">{children}</p>; }
 function StatusLabel({ status }: { status: ReportStatus }) { return <span className={`pill ${STATUS_CLASS[status]}`}>{STATUS[status]}</span>; }
-function ReportRows({ rows, admin = false }: { rows: SerializedReport[]; admin?: boolean }) {
-  if (!rows.length) return <div className="table-card empty"><h3>Belum ada laporan</h3><p>Data laporan akan muncul setelah laporan dibuat.</p></div>;
-  return <div className="table-wrap"><table><thead><tr><th>Nomor</th><th>Kategori</th><th>Tanggal</th><th>Status</th><th>Aksi</th></tr></thead><tbody>{rows.map(r => <tr key={r.id}><td><b>{r.id}</b></td><td>{r.category}</td><td>{dateText(r.createdAt)}</td><td><StatusLabel status={r.status}/></td><td><Link className="link-teal" href={`${admin ? "/admin" : "/user"}/reports/${encodeURIComponent(r.id)}`}>Detail</Link></td></tr>)}</tbody></table></div>;
+function ReportRows({ rows, admin = false, filtering = false }: { rows: SerializedReport[]; admin?: boolean; filtering?: boolean }) {
+  if (!rows.length) {
+    return (
+      <div className="empty">
+        <h3>{filtering ? "Tidak ada laporan yang cocok" : admin ? "Belum ada laporan masuk" : "Kamu belum membuat laporan"}</h3>
+        <p>
+          {filtering
+            ? "Ubah kata kunci atau pilihan status, lalu coba lagi."
+            : admin
+              ? "Laporan baru akan muncul di sini."
+              : "Kamu bisa memulai kapan pun siap. Tidak ada yang terkirim sampai kamu menekan Kirim laporan."}
+        </p>
+        {!admin && !filtering && <Link href="/user/new-report" className="btn btn-primary">Buat laporan</Link>}
+      </div>
+    );
+  }
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Nomor</th><th scope="col">Kategori</th><th scope="col">Tanggal</th><th scope="col">Status</th><th scope="col">Aksi</th></tr></thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.id}>
+              <td data-label="Nomor"><b>{r.id}</b></td>
+              <td data-label="Kategori">{r.category}</td>
+              <td data-label="Tanggal" className="num">{dateText(r.createdAt)}</td>
+              <td data-label="Status"><StatusLabel status={r.status}/></td>
+              <td data-label="Aksi"><Link className="link-teal" href={`${admin ? "/admin" : "/user"}/reports/${encodeURIComponent(r.id)}`}>Lihat detail<span className="sr-only"> laporan {r.id}</span></Link></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export function LiveUserDashboard() {
@@ -43,7 +74,33 @@ export function LiveUserDashboard() {
   const load = useCallback(async () => { setLoading(true); setError(""); try { const [s, r] = await Promise.all([fetchReportsSummary(), fetchReportsPage({ limit: 5 })]); setSummary(s); setRows(r.items); } catch(e) { setError(errorText(e)); } finally { setLoading(false); } }, []);
   useEffect(() => { void load(); }, [load]);
   const stats = [{ label: "Total laporan", value: summary?.total ?? 0 }, ...Object.entries(STATUS).map(([key, label]) => ({ label, value: summary?.byStatus[key as ReportStatus] ?? 0 }))];
-  return <AppShell role="user"><Head title="Dashboard" subtitle="Ringkasan laporan dan akses layanan SISKA." action={<Link className="btn btn-primary" href="/user/new-report">Buat laporan</Link>}/>{error && <Alert>{error}</Alert>}<div className="stats">{stats.map(x=><div className="stat" key={x.label}><div className="stat-top">{x.label}</div><div className="stat-num">{x.value}</div></div>)}</div><div className="section-head"><h2>Laporan terbaru</h2><Link href="/user/reports" className="link-arrow">Lihat semua</Link></div>{loading ? <p className="help">Memuat laporan…</p> : <ReportRows rows={rows}/>}<div className="help-grid"><section className="card help-card"><h3>Butuh bantuan?</h3><p>Hubungi petugas atau tanyakan informasi umum melalui SISKA AI.</p><Link href="/user/chat" className="btn btn-primary">Chat admin</Link> <Link href="/user/ai" className="btn btn-outline">SISKA AI</Link></section><section className="card help-card"><h3>Edukasi dan dukungan</h3><p>Pelajari hak, privasi, dan pilihan dukungan.</p><Link href="/education" className="link-teal">Buka edukasi</Link></section></div><button className="btn btn-outline" onClick={()=>void load()} disabled={loading}>Muat ulang</button></AppShell>;
+  return (
+    <AppShell role="user">
+      <Head title="Dashboard" subtitle="Ringkasan laporan dan akses layanan SISKA." action={<Link className="btn btn-primary" href="/user/new-report">Buat laporan</Link>}/>
+      {error && <Alert>{error}</Alert>}
+      <div className="stats">{stats.map(x => <div className={`stat ${x.value === 0 ? "zero" : ""}`} key={x.label}><div className="stat-top">{x.label}</div><div className="stat-num">{x.value}</div></div>)}</div>
+      <div className="section-head">
+        <h2>Laporan terbaru</h2>
+        <span className="row">
+          <button type="button" className="link-teal" onClick={()=>void load()} disabled={loading}>Muat ulang</button>
+          <Link href="/user/reports" className="link-teal">Lihat semua</Link>
+        </span>
+      </div>
+      {loading ? <p className="loading" role="status">Memuat laporan…</p> : <ReportRows rows={rows}/>}
+      <div className="help-grid">
+        <section className="help-card">
+          <h3>Ingin bicara dengan petugas?</h3>
+          <p>Kirim pesan ke petugas, atau tanyakan informasi umum tentang alur layanan ke SISKA AI.</p>
+          <div className="row"><Link href="/user/chat" className="btn btn-primary">Chat dengan admin</Link><Link href="/user/ai" className="btn btn-outline">Tanya SISKA AI</Link></div>
+        </section>
+        <section className="help-card">
+          <h3>Pelajari hak dan pilihanmu</h3>
+          <p>Baca tentang batas pribadi, privasi, dan pilihan dukungan.</p>
+          <Link href="/education" className="link-teal">Buka materi edukasi</Link>
+        </section>
+      </div>
+    </AppShell>
+  );
 }
 
 export function LiveNewReportPage() {
@@ -52,7 +109,51 @@ export function LiveNewReportPage() {
   const [files,setFiles]=useState<File[]>([]); const [busy,setBusy]=useState(false); const [error,setError]=useState(""); const [createdId,setCreatedId]=useState("");
   async function submit(e: React.FormEvent) { e.preventDefault(); setBusy(true); setError(""); try { const report=await submitNewReport({category,incidentAt:incidentAt?new Date(incidentAt).toISOString():null,location:location.trim()||null,description}); setCreatedId(report.id); for (const file of files) await uploadEvidenceMultipart(report.id,file); router.push(`/user/reports/${encodeURIComponent(report.id)}`); } catch(e) { setError(errorText(e)); } finally { setBusy(false); } }
   function addFiles(list: FileList|null) { if(!list)return; const accepted=Array.from(list); const invalid=accepted.find(f=>!(["application/pdf","image/jpeg","image/png"].includes(f.type))||f.size>5*1024*1024); if(invalid){setError(`${invalid.name}: format harus PDF/JPG/PNG dan ukuran maksimal 5 MiB.`);return;} setFiles(old=>[...old,...accepted]); }
-  return <AppShell role="user"><Head title="Buat laporan" subtitle="Isi informasi yang diperlukan. Lampiran bersifat opsional."/><form className="card" onSubmit={submit} style={{maxWidth:850}}><div className="form-grid"><label className="field"><span className="label">Kategori *</span><select required value={category} onChange={e=>setCategory(e.target.value)}><option value="">Pilih kategori</option>{["Pelecehan seksual","Kekerasan seksual","Kekerasan berbasis gender","Perundungan","Lainnya"].map(x=><option key={x}>{x}</option>)}</select></label><label className="field"><span className="label">Tanggal/waktu kejadian</span><input type="datetime-local" value={incidentAt} onChange={e=>setIncidentAt(e.target.value)}/></label><label className="field full"><span className="label">Lokasi / media kejadian</span><input maxLength={500} value={location} onChange={e=>setLocation(e.target.value)} placeholder="Opsional"/></label><label className="field full"><span className="label">Kronologi / deskripsi *</span><textarea className="textarea" required minLength={1} maxLength={20000} rows={7} value={description} onChange={e=>setDescription(e.target.value)} placeholder="Ceritakan hal yang ingin disampaikan…"/></label><label className="field full"><span className="label">Bukti pendukung (maks. 5 MiB per file)</span><input type="file" multiple accept="application/pdf,image/jpeg,image/png" onChange={e=>addFiles(e.target.files)}/>{files.map((f,i)=><div key={`${f.name}-${i}`} className="help">{f.name} · {(f.size/1024).toFixed(0)} KB <button type="button" className="link-teal" onClick={()=>setFiles(old=>old.filter((_,j)=>j!==i))}>Hapus</button></div>)}</label></div>{error&&<Alert>{error}</Alert>}{createdId&&<p className="help" role="status">Laporan {createdId} sudah tersimpan. Jika unggah bukti gagal, buka detail laporan untuk memastikan status dan bukti yang berhasil dikirim.</p>}<div className="actions"><button className="btn btn-primary" disabled={busy||!!createdId}>{busy?"Mengirim…":createdId?"Laporan sudah dibuat":"Kirim laporan"}</button>{createdId&&<Link className="btn btn-outline" href={`/user/reports/${encodeURIComponent(createdId)}`}>Buka laporan {createdId}</Link>}<Link href="/user" className="btn btn-outline">Batal</Link></div><p className="help">Laporan dibuat terlebih dahulu. Jika unggah bukti gagal, laporan tetap tersimpan dan bukti dapat dikirim ulang melalui detail laporan.</p></form></AppShell>;
+  return (
+    <AppShell role="user">
+      <Head title="Buat laporan" subtitle="Tulis seperlunya. Kamu bisa menambahkan bukti nanti lewat halaman detail laporan."/>
+      <form className="card" onSubmit={submit} style={{maxWidth:820}}>
+        <div className="note" role="note">
+          <div>
+            <b>Hanya dua isian yang wajib: kategori dan apa yang terjadi.</b>
+            Kolom lain boleh dikosongkan. Belum ada yang terkirim sampai kamu menekan Kirim laporan.
+          </div>
+        </div>
+
+        <section className="form-section">
+          <h2>Tentang kejadian</h2>
+          <p className="help">Perkiraan pun tidak apa-apa.</p>
+          <div className="form-grid">
+            <label className="field"><span className="label">Kategori <em className="req">wajib</em></span><select required value={category} onChange={e=>setCategory(e.target.value)}><option value="">Pilih kategori</option>{["Pelecehan seksual","Kekerasan seksual","Kekerasan berbasis gender","Perundungan","Lainnya"].map(x=><option key={x}>{x}</option>)}</select></label>
+            <label className="field"><span className="label">Tanggal dan waktu <em className="opt">boleh dikosongkan</em></span><input type="datetime-local" value={incidentAt} onChange={e=>setIncidentAt(e.target.value)}/></label>
+            <label className="field full"><span className="label">Lokasi atau media kejadian <em className="opt">boleh dikosongkan</em></span><input maxLength={500} value={location} onChange={e=>setLocation(e.target.value)} placeholder="Tempat, aplikasi, atau akun"/></label>
+          </div>
+        </section>
+
+        <section className="form-section">
+          <h2>Apa yang terjadi</h2>
+          <p className="help">Tulis sebanyak yang kamu nyaman bagikan. Tidak perlu rinci.</p>
+          <label className="field"><span className="label">Kronologi <em className="req">wajib</em></span><textarea className="textarea" required minLength={1} maxLength={20000} rows={7} value={description} onChange={e=>setDescription(e.target.value)} placeholder="Ceritakan hal yang ingin kamu sampaikan"/></label>
+        </section>
+
+        <section className="form-section">
+          <h2>Bukti pendukung</h2>
+          <p className="help">PDF, JPG, atau PNG. Maksimal 5 MiB per berkas.</p>
+          <label className="field"><span className="label">Pilih berkas <em className="opt">boleh dikosongkan</em></span><input type="file" multiple accept="application/pdf,image/jpeg,image/png" onChange={e=>addFiles(e.target.files)}/></label>
+          {files.length>0 && <div className="file-list">{files.map((f,i)=><div key={`${f.name}-${i}`} className="file-item"><span>{f.name}<span className="size">{(f.size/1024).toFixed(0)} KB</span></span><button type="button" className="btn btn-outline btn-sm" onClick={()=>setFiles(old=>old.filter((_,j)=>j!==i))}>Hapus<span className="sr-only"> {f.name}</span></button></div>)}</div>}
+        </section>
+
+        {error && <Alert>{error}</Alert>}
+        {createdId && <p className="status-msg" role="status" style={{marginTop:20}}>Laporan {createdId} sudah tersimpan. Jika unggah bukti gagal, buka detail laporan untuk memeriksa bukti yang berhasil dikirim.</p>}
+        <div className="actions">
+          <button className="btn btn-primary" disabled={busy||!!createdId}>{busy?"Mengirim…":createdId?"Laporan sudah dibuat":"Kirim laporan"}</button>
+          {createdId && <Link className="btn btn-outline" href={`/user/reports/${encodeURIComponent(createdId)}`}>Buka laporan {createdId}</Link>}
+          <Link href="/user" className="btn btn-outline">Batal</Link>
+        </div>
+        <p className="help" style={{marginTop:16}}>Laporan dibuat lebih dulu. Jika unggah bukti gagal, laporan tetap tersimpan dan bukti bisa dikirim ulang lewat detail laporan.</p>
+      </form>
+    </AppShell>
+  );
 }
 
 export function LiveHistoryPage({admin=false}:{admin?:boolean}) {
@@ -71,7 +172,20 @@ export function LiveHistoryPage({admin=false}:{admin?:boolean}) {
     router.replace(`${admin ? "/admin/reports/" : "/user/reports/"}${encodeURIComponent(match.id)}`);
   }, [admin, router, rows, searchParams]);
 
-  return <AppShell role={admin?"admin":"user"}><Head title={admin?"Kelola laporan":"Riwayat laporan"} subtitle={admin?"Daftar laporan yang dapat ditinjau petugas.":"Daftar laporan milik akunmu."} action={!admin?<Link href="/user/new-report" className="btn btn-primary">Buat laporan</Link>:undefined}/><div className="card filters"><label className="field"><span className="label">Cari laporan</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Nomor, kategori, deskripsi"/></label><label className="field"><span className="label">Status</span><select value={status} onChange={e=>{setStatus(e.target.value);setCursor(null);}}><option value="">Semua status</option>{Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><button className="btn btn-outline" onClick={()=>void load(true)} disabled={busy}>Terapkan / muat ulang</button></div>{error&&<Alert>{error}</Alert>}{busy&&<p className="help">Memuat…</p>}<ReportRows rows={filtered} admin={admin}/>{next&&<button className="btn btn-outline" disabled={busy} onClick={()=>void load(false)}>Muat berikutnya</button>}</AppShell>;
+  return (
+    <AppShell role={admin?"admin":"user"}>
+      <Head title={admin?"Kelola laporan":"Riwayat laporan"} subtitle={admin?"Daftar laporan yang dapat ditinjau petugas.":"Daftar laporan milik akunmu."} action={!admin?<Link href="/user/new-report" className="btn btn-primary">Buat laporan</Link>:undefined}/>
+      <div className="card filters">
+        <label className="field"><span className="label">Cari laporan</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Nomor, kategori, atau isi laporan"/></label>
+        <label className="field"><span className="label">Status</span><select value={status} onChange={e=>{setStatus(e.target.value);setCursor(null);}}><option value="">Semua status</option>{Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
+        <button className="btn btn-outline" onClick={()=>void load(true)} disabled={busy}>Muat ulang</button>
+      </div>
+      {error&&<Alert>{error}</Alert>}
+      {busy&&<p className="loading" role="status">Memuat…</p>}
+      <ReportRows rows={filtered} admin={admin} filtering={!!(query||status)}/>
+      {next&&<div className="more-row"><button className="btn btn-outline" disabled={busy} onClick={()=>void load(false)}>Muat laporan berikutnya</button></div>}
+    </AppShell>
+  );
 }
 
 function Detail({id,admin}:{id:string;admin:boolean}) {
@@ -80,7 +194,62 @@ function Detail({id,admin}:{id:string;admin:boolean}) {
  async function update(e:React.FormEvent){e.preventDefault();if(!report)return;setBusy(true);setError("");try{await transitionReportStatusByAdmin(id,{status:next,note:note.trim()||undefined});await load();setNote("");}catch(e){setError(errorText(e));}finally{setBusy(false);}}
  async function download(evidenceId:string){try{const {url}=await (await import("@/lib/api-client")).fetchEvidenceSignedDownloadUrl(id,evidenceId);window.open(url,"_blank","noopener,noreferrer");}catch(e){setError(errorText(e));}}
  async function uploadEvidence(file:File){setUploadBusy(true);setError("");try{await uploadEvidenceMultipart(id,file);await load();}catch(e){setError(errorText(e));}finally{setUploadBusy(false);}}
- return <AppShell role={admin?"admin":"user"}><Head title="Detail laporan" subtitle={`Nomor laporan: ${id}`} action={<Link className="btn btn-outline" href={admin?"/admin/reports":"/user/reports"}>Kembali</Link>}/>{error&&<Alert>{error}</Alert>}{!report?<p className="help">Memuat detail laporan…</p>:<div className="two-col wide-right"><section className="card"><div className="section-head"><h2>{report.id}</h2><StatusLabel status={report.status}/></div><dl className="detail-grid"><dt>Kategori</dt><dd>{report.category}</dd><dt>Tanggal kejadian</dt><dd>{dateText(report.incidentAt)}</dd><dt>Tanggal laporan</dt><dd>{dateText(report.createdAt)}</dd><dt>Lokasi</dt><dd>{report.location||"Tidak dicantumkan"}</dd></dl><h3>Kronologi / deskripsi</h3><p style={{whiteSpace:"pre-wrap",lineHeight:1.8}}>{report.description}</p><h3>Bukti pendukung</h3>{report.evidence.length?report.evidence.map(x=><div key={x.id} className="file-item"><span>{x.originalName} · {(x.sizeBytes/1024).toFixed(0)} KB</span><button className="btn btn-outline btn-sm" onClick={()=>void download(x.id)}>Unduh</button></div>):<p className="help">Belum ada bukti.</p>}{!admin&&<label className="field"><span className="label">Tambah bukti (PDF/JPG/PNG, maks. 5 MiB)</span><input type="file" accept="application/pdf,image/jpeg,image/png" disabled={uploadBusy} onChange={e=>{const file=e.target.files?.[0];if(file)void uploadEvidence(file);e.currentTarget.value="";}}/>{uploadBusy&&<small className="help">Mengunggah bukti…</small>}</label>}<h3>Riwayat status</h3>{report.statusHistory.map(h=><div key={h.id} className="help" style={{padding:"8px 0",borderBottom:"1px solid var(--line)"}}>{dateText(h.createdAt)} · {h.fromStatus?STATUS[h.fromStatus]+" → ":""}{STATUS[h.toStatus]}{h.note?` — ${h.note}`:""}</div>)}</section>{admin?<form className="card" onSubmit={update}><h3>Tindak lanjut petugas</h3><p>Status saat ini: <StatusLabel status={report.status}/></p><label className="field"><span className="label">Status baru</span><select value={next} onChange={e=>setNext(e.target.value as ReportStatus)}>{(ALLOWED_STATUS_TRANSITIONS[report.status] as readonly ReportStatus[]).map(s=><option key={s} value={s}>{STATUS[s]}</option>)}</select></label><label className="field"><span className="label">Catatan {isStatusNoteRequired(report.status,next)?"* (wajib untuk transisi ini)":"(opsional)"}</span><textarea className="textarea" rows={4} required={isStatusNoteRequired(report.status,next)} value={note} onChange={e=>setNote(e.target.value)}/></label><button className="btn btn-primary" disabled={busy}>{busy?"Menyimpan…":"Simpan status"}</button></form>:<section className="card"><h3>Butuh klarifikasi?</h3><p>Hubungi petugas melalui percakapan aman.</p><Link className="btn btn-primary" href="/user/chat">Chat dengan admin</Link></section>}</div>}</AppShell>;
+ return (
+  <AppShell role={admin?"admin":"user"}>
+    <Head title="Detail laporan" subtitle={`Nomor laporan ${id}`} action={<Link className="btn btn-outline" href={admin?"/admin/reports":"/user/reports"}>Kembali ke daftar</Link>}/>
+    {error&&<Alert>{error}</Alert>}
+    {!report?<p className="loading" role="status">Memuat detail laporan…</p>:(
+      <div className="two-col wide-right">
+        <div className="detail-main">
+          <div className="detail-title"><h2>{report.id}</h2><StatusLabel status={report.status}/></div>
+          <dl className="detail-grid">
+            <dt>Kategori</dt><dd>{report.category}</dd>
+            <dt>Tanggal kejadian</dt><dd>{dateText(report.incidentAt)}</dd>
+            <dt>Tanggal laporan</dt><dd>{dateText(report.createdAt)}</dd>
+            <dt>Lokasi</dt><dd>{report.location||"Tidak dicantumkan"}</dd>
+          </dl>
+          <section className="detail-block"><h3>Kronologi</h3><p className="body">{report.description}</p></section>
+          <section className="detail-block">
+            <h3>Bukti pendukung</h3>
+            {report.evidence.length?<div className="file-list">{report.evidence.map(x=><div key={x.id} className="file-item"><span>{x.originalName}<span className="size">{(x.sizeBytes/1024).toFixed(0)} KB</span></span><button className="btn btn-outline btn-sm" onClick={()=>void download(x.id)}>Unduh<span className="sr-only"> {x.originalName}</span></button></div>)}</div>:<p className="help">Belum ada bukti.</p>}
+            {!admin&&<label className="field" style={{marginTop:16}}><span className="label">Tambah bukti <em className="opt">PDF, JPG, PNG, maks. 5 MiB</em></span><input type="file" accept="application/pdf,image/jpeg,image/png" disabled={uploadBusy} onChange={e=>{const file=e.target.files?.[0];if(file)void uploadEvidence(file);e.currentTarget.value="";}}/>{uploadBusy&&<span className="help" role="status">Mengunggah bukti…</span>}</label>}
+          </section>
+          <section className="detail-block">
+            <h3>Riwayat status</h3>
+            <ol className="timeline">
+              {[...report.statusHistory].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(h=>(
+                <li key={h.id}>
+                  <time dateTime={h.createdAt}>{dateText(h.createdAt)}</time>
+                  <span className="what">{STATUS[h.toStatus]}</span>{h.fromStatus&&<span className="from"> dari {STATUS[h.fromStatus]}</span>}
+                  {h.note&&<p className="note-text">{h.note}</p>}
+                </li>
+              ))}
+            </ol>
+          </section>
+        </div>
+        {admin?(
+          <form className="side-panel" onSubmit={update}>
+            <h3>Tindak lanjut petugas</h3>
+            <p className="current">Status saat ini <StatusLabel status={report.status}/></p>
+            {(ALLOWED_STATUS_TRANSITIONS[report.status] as readonly ReportStatus[]).length===0?(
+              <p className="help">Laporan ini sudah berstatus akhir, jadi tidak ada perubahan status yang tersedia.</p>
+            ):(<>
+              <label className="field"><span className="label">Status baru</span><select value={next} onChange={e=>setNext(e.target.value as ReportStatus)}>{(ALLOWED_STATUS_TRANSITIONS[report.status] as readonly ReportStatus[]).map(s=><option key={s} value={s}>{STATUS[s]}</option>)}</select></label>
+              <label className="field"><span className="label">Catatan {isStatusNoteRequired(report.status,next)?<em className="req">wajib untuk perubahan ini</em>:<em className="opt">boleh dikosongkan</em>}</span><textarea className="textarea" style={{minHeight:120}} rows={4} required={isStatusNoteRequired(report.status,next)} value={note} onChange={e=>setNote(e.target.value)}/></label>
+              <button className="btn btn-primary" disabled={busy}>{busy?"Menyimpan…":"Simpan status"}</button>
+            </>)}
+          </form>
+        ):(
+          <aside className="side-panel">
+            <h3>Butuh klarifikasi?</h3>
+            <p>Hubungi petugas lewat percakapan di SISKA.</p>
+            <Link className="btn btn-primary" href="/user/chat" style={{marginTop:0}}>Chat dengan admin</Link>
+          </aside>
+        )}
+      </div>
+    )}
+  </AppShell>
+ );
 }
 export function LiveUserReportDetail({id}:{id:string}){return <Detail id={id} admin={false}/>;}
 export function LiveAdminReportDetail({id}:{id:string}){return <Detail id={id} admin={true}/>;}
@@ -278,25 +447,25 @@ function ConversationChat({admin}:{admin:boolean}) {
  }
 
  return <AppShell role={admin?"admin":"user"}>
-  <Head title={admin?"Chat pengguna":"Chat dengan Admin"} subtitle="Pesan dan perubahan percakapan diperbarui otomatis." action={!admin?<button className="btn btn-primary" disabled={busy||loading} onClick={()=>void start()}>{conversations.some(item=>item.status==="open")?"Buka percakapan":"Percakapan baru"}</button>:undefined}/>
-  {error&&<Alert>{error}</Alert>}{notice&&<p className="help" role="status">{notice}</p>}
+  <Head title={admin?"Chat pengguna":"Chat dengan Admin"} subtitle="Pesan baru muncul otomatis. Tidak perlu memuat ulang halaman." action={!admin?<button className="btn btn-primary" disabled={busy||loading} onClick={()=>void start()}>{conversations.some(item=>item.status==="open")?"Buka percakapan":"Percakapan baru"}</button>:undefined}/>
+  {error&&<Alert>{error}</Alert>}{notice&&<p className="status-msg" role="status">{notice}</p>}
   <div className="chat" style={{minHeight:520}}>
-   <aside className="chat-list"><div className="chat-list-head"><h3>Percakapan</h3></div>
+   <aside className="chat-list" aria-label="Daftar percakapan"><div className="chat-list-head"><h3>Percakapan</h3></div>
     {conversations.map(conversation=>{
      const name=admin?(reporterNames[conversation.reporterId]||"Pengguna SISKA"):"Chat dengan Admin";
      const preview=conversation.lastMessage||"Buka untuk melihat pesan";
-     return <button key={conversation.id} className={`conv ${active===conversation.id?"active":""}`} onClick={()=>setActive(conversation.id)}>
-      <b>{name}</b><small>{preview.length>64?`${preview.slice(0,61)}…`:preview}</small><small>{conversation.status==="open"?"Terbuka":"Ditutup"} · {dateText(conversation.lastMessageAt||conversation.updatedAt)}</small>
+     return <button key={conversation.id} className={`conv ${active===conversation.id?"active":""}`} aria-current={active===conversation.id?"true":undefined} onClick={()=>setActive(conversation.id)}>
+      <b>{name}</b><small>{preview.length>64?`${preview.slice(0,61)}…`:preview}</small><small>{conversation.status==="open"?"Terbuka":"Ditutup"}, {dateText(conversation.lastMessageAt||conversation.updatedAt)}</small>
      </button>;
     })}
-    {!loading&&!conversations.length&&<p className="help">Belum ada percakapan.</p>}
-    {loading&&!conversations.length&&<p className="help">Memuat percakapan…</p>}
+    {!loading&&!conversations.length&&<p className="help">{admin?"Belum ada percakapan masuk.":"Belum ada percakapan. Pilih Percakapan baru untuk menulis ke petugas."}</p>}
+    {loading&&!conversations.length&&<p className="status-msg" role="status">Memuat percakapan…</p>}
    </aside>
    <section className="chat-pane">
     <div className="chat-head"><b>{current?(admin?reporterName:"Chat dengan Admin"):"Percakapan SISKA"}</b><div className="row">
      {admin&&current&&<button className="btn btn-outline btn-sm" disabled={statusBusy} onClick={()=>void toggleStatus()}>{current.status==="open"?"Tutup percakapan":"Buka kembali"}</button>}
     </div></div>
-    <div className="chat-body" aria-live="polite">
+    <div className="chat-body" role="log" aria-live="polite" aria-label="Pesan">
      {messages.map(message=>{
       const isReporter=message.senderUid===current?.reporterId;
       const isMine=message.senderUid===currentUid;
@@ -305,14 +474,14 @@ function ConversationChat({admin}:{admin:boolean}) {
      })}
      {!messages.length&&<p className="help">{current?"Belum ada pesan. Mulai percakapan dengan mengirim pesan.":"Pilih percakapan untuk melihat pesan."}</p>}
     </div>
-    <form className="compose" onSubmit={send}><div className="compose-row"><input value={text} onChange={event=>setText(event.target.value)} maxLength={10000} placeholder="Tulis pesan…" disabled={!current||current.status==="closed"||busy}/><button className="btn btn-primary btn-sm" disabled={!current||current.status==="closed"||busy||!text.trim()}>Kirim</button></div></form>
+    <form className="compose" onSubmit={send}><div className="compose-row"><input type="text" aria-label="Tulis pesan" value={text} onChange={event=>setText(event.target.value)} maxLength={10000} placeholder={current?.status==="closed"?"Percakapan ini sudah ditutup":"Tulis pesan…"} disabled={!current||current.status==="closed"||busy}/><button className="btn btn-primary btn-sm" disabled={!current||current.status==="closed"||busy||!text.trim()}>Kirim</button></div></form>
    </section>
   </div>
  </AppShell>;
 }
 export function LiveUserChatPage(){return <ConversationChat admin={false}/>;}
 export function LiveAdminChatPage(){return <ConversationChat admin={true}/>;}
-export function LiveUserAiPage(){return <AppShell role="user"><Head title="Chatbot SISKA AI" subtitle="Asisten informasi umum berdasarkan knowledge base terverifikasi."/><AiChatPanel/></AppShell>;}
+export function LiveUserAiPage(){return <AppShell role="user"><Head title="SISKA AI" subtitle="Asisten informasi umum yang menjawab dari dokumen yang disiapkan petugas."/><AiChatPanel/></AppShell>;}
 
 export function LiveAdminDashboard(){
   const [summary,setSummary]=useState<ReportsSummaryResult|null>(null);
@@ -373,7 +542,36 @@ export function LiveAdminDashboard(){
     }
   }
 
-  return <AppShell role="admin"><Head title="Dashboard admin" subtitle="Ringkasan laporan aktual dari backend SISKA."/><div className="stats">{[{label:"Total laporan",value:summary?.total??0},...Object.entries(STATUS).map(([k,v])=>({label:v,value:summary?.byStatus[k as ReportStatus]??0}))].map(s=><div className="stat" key={s.label}><div className="stat-top">{s.label}</div><div className="stat-num">{s.value}</div></div>)}</div>{error&&<Alert>{error}</Alert>}{notice&&<p className="help" role="status">{notice}</p>}<div className="section-head"><h2>Laporan terbaru</h2><Link href="/admin/reports" className="link-teal">Kelola semua</Link></div><ReportRows rows={rows} admin/><section className="card" style={{marginTop:18,maxWidth:900}}><h2 className="card-title">Kirim broadcast ke pengguna</h2><form className="form-grid" onSubmit={submitBroadcast}><label className="field"><span className="label">Judul notifikasi *</span><input required minLength={3} maxLength={150} value={title} onChange={e=>setTitle(e.target.value)} placeholder="Pembaruan layanan SISKA"/></label><label className="field full"><span className="label">Isi pesan *</span><textarea className="textarea" required minLength={5} maxLength={1000} rows={5} value={body} onChange={e=>setBody(e.target.value)} placeholder="Informasikan update, pengingat, atau perubahan penting…"/></label><div className="form-grid" style={{gridTemplateColumns:"repeat(2,minmax(0,1fr))",width:"100%"}}><label className="field"><span className="label">Jenis target</span><select value={targetType} onChange={e=>setTargetType(e.target.value as "none"|"report"|"conversation"|"education")}><option value="none">Tanpa target</option><option value="report">Laporan</option><option value="conversation">Percakapan</option><option value="education">Edukasi</option></select></label><label className="field"><span className="label">Target audiens</span><select value={targetRole} onChange={e=>setTargetRole(e.target.value as "reporter"|"all")}><option value="reporter">Reporter saja</option><option value="all">Semua pengguna</option></select></label></div><label className="field full"><span className="label">ID target (opsional)</span><input value={targetId} onChange={e=>setTargetId(e.target.value)} placeholder="contoh: rpt_123 atau edu_456" disabled={targetType==="none"} maxLength={120}/></label><button className="btn btn-primary" disabled={sending||!title.trim()||!body.trim()}>{sending?"Mengirim…":"Kirim broadcast"}</button></form></section><section className="card" style={{marginTop:18,maxWidth:900}}><div className="section-head"><h2>Riwayat broadcast terbaru</h2><span className="chip">{history.length} item</span></div>{history.length===0?<p className="help">Belum ada broadcast yang dikirim pada sesi ini.</p>:<div className="stack">{history.map((item,index)=><div key={`${item.sentAt}-${index}`} className="help" style={{padding:"10px 12px",border:"1px solid var(--line)",borderRadius:10,display:"grid",gap:4}}><strong>{item.title}</strong><span>{item.body}</span><small>{new Date(item.sentAt).toLocaleString("id-ID", {dateStyle:"medium", timeStyle:"short"})} · {item.targetRole === "all" ? "Semua pengguna" : "Reporter saja"}{item.targetType !== "none" ? ` · ${item.targetType}` : ""}</small></div>)}</div>}</section></AppShell>;
+  return (
+    <AppShell role="admin">
+      <Head title="Dashboard" subtitle="Ringkasan laporan dari backend SISKA."/>
+      {error&&<Alert>{error}</Alert>}
+      {notice&&<p className="status-msg" role="status">{notice}</p>}
+      <div className="stats">{[{label:"Total laporan",value:summary?.total??0},...Object.entries(STATUS).map(([k,v])=>({label:v,value:summary?.byStatus[k as ReportStatus]??0}))].map(s=><div className={`stat ${s.value===0?"zero":""}`} key={s.label}><div className="stat-top">{s.label}</div><div className="stat-num">{s.value}</div></div>)}</div>
+      <div className="section-head"><h2>Laporan terbaru</h2><Link href="/admin/reports" className="link-teal">Kelola semua laporan</Link></div>
+      <ReportRows rows={rows} admin/>
+
+      <div className="two-col" style={{marginTop:48}}>
+        <form className="card" onSubmit={submitBroadcast}>
+          <h2 className="card-title">Kirim pengumuman ke pengguna</h2>
+          <div className="stack">
+            <label className="field"><span className="label">Judul <em className="req">wajib</em></span><input required minLength={3} maxLength={150} value={title} onChange={e=>setTitle(e.target.value)} placeholder="Pembaruan layanan SISKA"/></label>
+            <label className="field"><span className="label">Isi pesan <em className="req">wajib</em></span><textarea className="textarea" style={{minHeight:130}} required minLength={5} maxLength={1000} rows={5} value={body} onChange={e=>setBody(e.target.value)} placeholder="Tulis pembaruan, pengingat, atau perubahan penting"/></label>
+            <div className="form-grid">
+              <label className="field"><span className="label">Tautkan ke</span><select value={targetType} onChange={e=>setTargetType(e.target.value as "none"|"report"|"conversation"|"education")}><option value="none">Tanpa tautan</option><option value="report">Laporan</option><option value="conversation">Percakapan</option><option value="education">Edukasi</option></select></label>
+              <label className="field"><span className="label">Penerima</span><select value={targetRole} onChange={e=>setTargetRole(e.target.value as "reporter"|"all")}><option value="reporter">Pelapor saja</option><option value="all">Semua pengguna</option></select></label>
+            </div>
+            <label className="field"><span className="label">ID tautan <em className="opt">boleh dikosongkan</em></span><input value={targetId} onChange={e=>setTargetId(e.target.value)} placeholder="Contoh: rpt_123 atau edu_456" disabled={targetType==="none"} maxLength={120}/></label>
+          </div>
+          <div className="actions"><button className="btn btn-primary" disabled={sending||!title.trim()||!body.trim()}>{sending?"Mengirim…":"Kirim pengumuman"}</button></div>
+        </form>
+        <section className="card">
+          <h2 className="card-title">Terkirim sesi ini</h2>
+          {history.length===0?<p className="help">Belum ada pengumuman yang dikirim pada sesi ini.</p>:<div className="broadcast-log">{history.map((item,index)=><div key={`${item.sentAt}-${index}`}><strong>{item.title}</strong><span>{item.body}</span><small>{new Date(item.sentAt).toLocaleString("id-ID",{dateStyle:"medium",timeStyle:"short"})}, {item.targetRole==="all"?"semua pengguna":"pelapor saja"}{item.targetType!=="none"?`, tautan ${item.targetType}`:""}</small></div>)}</div>}
+        </section>
+      </div>
+    </AppShell>
+  );
 }
 
 
@@ -384,7 +582,33 @@ export function LiveAdminDocumentsPage(){
  async function upload(e:React.FormEvent){e.preventDefault();if(!file)return;setSaving(true);setError("");setNotice("");try{await uploadKnowledgePdfByAdmin(file,title.trim()||undefined);setFile(null);setTitle("");const picker=document.getElementById("siska-kb-pdf") as HTMLInputElement|null;if(picker)picker.value="";setNotice("Dokumen diterima backend dan masuk ke proses indeks.");await load();}catch(e){setError(errorText(e));}finally{setSaving(false);}}
  async function remove(doc:SerializedKnowledgeDocument){if(!window.confirm(`Hapus dokumen "${doc.title}" dan seluruh chunk terkait?`))return;setDeleting(doc.id);setError("");try{await deleteKnowledgeDocumentByAdmin(doc.id);setNotice(`Dokumen “${doc.title}” berhasil dihapus.`);await load();}catch(e){setError(errorText(e));}finally{setDeleting("");}}
  async function reindex(){setReindexing(true);setError("");setNotice("");try{const result=await triggerKnowledgeReindexByAdmin();setNotice(`Reindex ${result.status}: ${result.processedCount} diproses, ${result.indexedCount} berhasil, ${result.failedCount} gagal.`);await load();}catch(e){setError(errorText(e));}finally{setReindexing(false);}}
- return <AppShell role="admin"><Head title="Knowledge base SISKA AI" subtitle="Unggah PDF, pantau status indeks, hapus dokumen, dan jalankan reindex melalui backend."/><div className="two-col"><form className="card" onSubmit={upload}><h2 className="card-title">Unggah dokumen PDF</h2><label className="field"><span className="label">Judul dokumen (opsional)</span><input maxLength={250} value={title} onChange={e=>setTitle(e.target.value)} placeholder="Pedoman layanan SISKA"/></label><label className="field"><span className="label">File PDF (maks. 25 MiB) *</span><input id="siska-kb-pdf" type="file" accept="application/pdf,.pdf" required onChange={e=>setFile(e.target.files?.[0]??null)}/></label>{file&&<p className="help">{file.name} · {(file.size/1024/1024).toFixed(2)} MiB</p>}<button className="btn btn-primary" disabled={!file||saving}>{saving?"Mengunggah…":"Unggah dan indeks"}</button></form><section className="card"><h2 className="card-title">Pengindeksan</h2><p className="prose">Reindex meminta backend memproses ulang dokumen knowledge base yang tersedia. Status akhirnya dapat berubah setelah pekerjaan selesai.</p><button className="btn btn-outline" disabled={reindexing||loading} onClick={()=>void reindex()}>{reindexing?"Meminta reindex…":"Jalankan reindex"}</button><button className="btn btn-outline" style={{marginLeft:8}} disabled={loading} onClick={()=>void load()}>Muat ulang daftar</button></section></div>{error&&<Alert>{error}</Alert>}{notice&&<p className="help" role="status">{notice}</p>}<section className="card" style={{marginTop:18}}><div className="section-head"><h2>Dokumen terdaftar</h2><span className="chip">{documents.length} dokumen</span></div>{loading&&<p className="help">Memuat dokumen…</p>}{!loading&&!documents.length&&<p className="help">Belum ada dokumen knowledge base.</p>}{documents.map(doc=><div key={doc.id} className="file-item" style={{justifyContent:"space-between",gap:12}}><div style={{minWidth:0}}><b>{doc.title}</b><div className="help">{doc.status.toUpperCase()} · {doc.chunkCount} chunk · versi {doc.version} · {dateText(doc.updatedAt)}</div>{doc.errorCode&&<div className="error-text">Kode: {doc.errorCode}</div>}</div><button className="btn btn-outline btn-sm" disabled={deleting===doc.id} onClick={()=>void remove(doc)}>{deleting===doc.id?"Menghapus…":"Hapus"}</button></div>)}</section></AppShell>;
+ return (
+ <AppShell role="admin">
+  <Head title="Dokumen SISKA AI" subtitle="Unggah PDF sebagai sumber jawaban SISKA AI, pantau status indeks, dan jalankan indeks ulang."/>
+  {error&&<Alert>{error}</Alert>}
+  {notice&&<p className="status-msg" role="status">{notice}</p>}
+  <div className="two-col">
+   <form className="card" onSubmit={upload}>
+    <h2 className="card-title">Unggah dokumen PDF</h2>
+    <label className="field"><span className="label">Judul dokumen <em className="opt">boleh dikosongkan</em></span><input maxLength={250} value={title} onChange={e=>setTitle(e.target.value)} placeholder="Pedoman layanan SISKA"/></label>
+    <label className="field"><span className="label">Berkas PDF <em className="req">wajib, maks. 25 MiB</em></span><input id="siska-kb-pdf" type="file" accept="application/pdf,.pdf" required onChange={e=>setFile(e.target.files?.[0]??null)}/></label>
+    {file&&<p className="help" style={{marginTop:8}}>{file.name}, {(file.size/1024/1024).toFixed(2)} MiB</p>}
+    <div className="actions"><button className="btn btn-primary" disabled={!file||saving}>{saving?"Mengunggah…":"Unggah dan indeks"}</button></div>
+   </form>
+   <section className="card">
+    <h2 className="card-title">Indeks ulang</h2>
+    <p className="prose" style={{marginBottom:20}}>Meminta backend memproses ulang semua dokumen yang tersedia. Status akhir bisa berubah setelah pekerjaan selesai.</p>
+    <div className="row"><button className="btn btn-outline" disabled={reindexing||loading} onClick={()=>void reindex()}>{reindexing?"Meminta indeks ulang…":"Jalankan indeks ulang"}</button><button className="btn btn-outline" disabled={loading} onClick={()=>void load()}>Muat ulang daftar</button></div>
+   </section>
+  </div>
+  <section className="card" style={{marginTop:32}}>
+   <div className="section-head"><h2>Dokumen terdaftar</h2><span className="chip">{documents.length} dokumen</span></div>
+   {loading&&<p className="loading" role="status">Memuat dokumen…</p>}
+   {!loading&&!documents.length&&<p className="help">Belum ada dokumen. Unggah PDF pertama di atas.</p>}
+   {documents.map(doc=><div key={doc.id} className="doc-row"><div style={{minWidth:0}}><b>{doc.title}</b><div className="help">{doc.status.toUpperCase()}, {doc.chunkCount} potongan, versi {doc.version}, {dateText(doc.updatedAt)}</div>{doc.errorCode&&<div className="error-text" style={{marginTop:4}}>Kode galat: {doc.errorCode}</div>}</div><button className="btn btn-outline btn-sm" disabled={deleting===doc.id} onClick={()=>void remove(doc)}>{deleting===doc.id?"Menghapus…":"Hapus"}<span className="sr-only"> {doc.title}</span></button></div>)}
+  </section>
+ </AppShell>
+ );
 }
 
 
@@ -392,7 +616,15 @@ export function LiveAdminAuditPage(){
  const [events,setEvents]=useState<SerializedAuditEvent[]>([]);const [error,setError]=useState("");const [loading,setLoading]=useState(false);
  const load=useCallback(async()=>{setLoading(true);setError("");try{const result=await fetchAuditEventsByAdmin({limit:50});setEvents(result.items);}catch(e){setError(errorText(e));}finally{setLoading(false);}},[]);
  useEffect(()=>{void load();},[load]);
- return <AppShell role="admin"><Head title="Audit log" subtitle="Catatan aktivitas backend untuk akuntabilitas dan penelusuran tindakan." action={<button className="btn btn-outline" disabled={loading} onClick={()=>void load()}>Muat ulang</button>}/>{error&&<Alert>{error}</Alert>}{loading&&<p className="help">Memuat audit log…</p>}{!loading&&!events.length&&<div className="table-card empty"><h3>Belum ada aktivitas</h3></div>}<div className="table-wrap"><table><thead><tr><th>Waktu</th><th>Aktor UID</th><th>Aksi</th><th>Target</th><th>Request ID</th></tr></thead><tbody>{events.map(event=><tr key={event.id}><td>{dateText(event.occurredAt)}</td><td><code>{event.actorUid}</code></td><td>{event.action}</td><td>{event.targetType}: {event.targetId}</td><td><code>{event.requestId}</code></td></tr>)}</tbody></table></div></AppShell>;
+ return (
+ <AppShell role="admin">
+  <Head title="Log audit" subtitle="Catatan aktivitas backend untuk akuntabilitas dan penelusuran tindakan." action={<button className="btn btn-outline" disabled={loading} onClick={()=>void load()}>Muat ulang</button>}/>
+  {error&&<Alert>{error}</Alert>}
+  {loading&&<p className="loading" role="status">Memuat log audit…</p>}
+  {!loading&&!events.length&&<div className="empty"><h3>Belum ada aktivitas</h3><p>Tindakan petugas dan sistem akan tercatat di sini.</p></div>}
+  {events.length>0&&<div className="table-wrap"><table><thead><tr><th scope="col">Waktu</th><th scope="col">Aktor</th><th scope="col">Aksi</th><th scope="col">Target</th><th scope="col">ID permintaan</th></tr></thead><tbody>{events.map(event=><tr key={event.id}><td data-label="Waktu" className="num">{dateText(event.occurredAt)}</td><td data-label="Aktor"><code>{event.actorUid}</code></td><td data-label="Aksi">{event.action}</td><td data-label="Target">{event.targetType}: {event.targetId}</td><td data-label="ID permintaan"><code>{event.requestId}</code></td></tr>)}</tbody></table></div>}
+ </AppShell>
+ );
 }
 
 export function LiveProfilePage(){
@@ -401,5 +633,5 @@ export function LiveProfilePage(){
  useEffect(()=>{fetchMyProfile().then(p=>{setName(p.displayName);setEmail(p.email);setRole(p.role);}).catch(e=>setError(errorText(e)));},[]);
  async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");setMessage("");try{const p=await updateMyProfileName(name.trim());if(auth?.currentUser) await updateProfile(auth.currentUser,{displayName:p.displayName});setName(p.displayName);setMessage("Nama profil berhasil diperbarui.");}catch(e){setError(errorText(e));}finally{setBusy(false);}}
  async function changePassword(e:React.FormEvent){e.preventDefault();setError("");setMessage("");if(newPassword.length<6){setError("Password baru minimal 6 karakter.");return;}if(newPassword!==confirmPassword){setError("Konfirmasi password tidak sama.");return;}const user=auth?.currentUser;if(!user?.email){setError("Sesi akun tidak ditemukan. Silakan login ulang.");return;}setBusy(true);try{await reauthenticateWithCredential(user,EmailAuthProvider.credential(user.email,currentPassword));await updatePassword(user,newPassword);setCurrentPassword("");setNewPassword("");setConfirmPassword("");setMessage("Password berhasil diperbarui.");}catch(e){setError((e as {code?:string})?.code==="auth/wrong-password"?"Password saat ini tidak sesuai.":"Password belum dapat diperbarui. Silakan login ulang jika sesi kedaluwarsa.");}finally{setBusy(false);}}
- return <AppShell role="user"><Head title="Profil dan pengaturan" subtitle="Informasi akun tersimpan pada profil SISKA."/><div className="stack" style={{maxWidth:700}}><form className="card" onSubmit={save}><h2 className="card-title">Informasi akun</h2><label className="field"><span className="label">Nama tampilan</span><input required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></label><label className="field"><span className="label">Email</span><input value={email} readOnly/></label><label className="field"><span className="label">Peran</span><input value={role} readOnly/></label><button className="btn btn-primary" disabled={busy}>{busy?"Menyimpan…":"Simpan perubahan"}</button></form><form className="card" onSubmit={changePassword}><h2 className="card-title">Ubah password</h2><label className="field"><span className="label">Password saat ini</span><input type="password" autoComplete="current-password" required value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)}/></label><label className="field"><span className="label">Password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={newPassword} onChange={e=>setNewPassword(e.target.value)}/></label><label className="field"><span className="label">Konfirmasi password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)}/></label><button className="btn btn-outline" disabled={busy}>Ubah password</button></form>{error&&<Alert>{error}</Alert>}{message&&<p role="status" className="help">{message}</p>}</div></AppShell>;
+ return <AppShell role="user"><Head title="Profil dan pengaturan" subtitle="Informasi akun yang tersimpan di SISKA."/><div className="stack" style={{maxWidth:640}}><form className="card stack" onSubmit={save}><h2 className="card-title" style={{marginBottom:0}}>Informasi akun</h2><label className="field"><span className="label">Nama tampilan</span><input required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></label><label className="field"><span className="label">Email</span><input value={email} readOnly/></label><label className="field"><span className="label">Peran</span><input value={role==="admin"?"Petugas":role==="reporter"?"Pengguna":role} readOnly/></label><button className="btn btn-primary" disabled={busy}>{busy?"Menyimpan…":"Simpan perubahan"}</button></form><form className="card stack" onSubmit={changePassword}><h2 className="card-title" style={{marginBottom:0}}>Ubah password</h2><label className="field"><span className="label">Password saat ini</span><input type="password" autoComplete="current-password" required value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)}/></label><label className="field"><span className="label">Password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={newPassword} onChange={e=>setNewPassword(e.target.value)}/></label><label className="field"><span className="label">Konfirmasi password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)}/></label><button className="btn btn-outline" disabled={busy}>Ubah password</button></form>{error&&<Alert>{error}</Alert>}{message&&<p role="status" className="status-msg">{message}</p>}</div></AppShell>;
 }

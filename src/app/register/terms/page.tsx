@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft, Info } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { PrintButton } from "@/components/print-button";
+import { QuickExit } from "@/components/quick-exit";
 
 const sections = [
   { id: "tujuan", n: "01", t: "Tujuan layanan", p: "SISKA dirancang untuk memudahkan penyampaian laporan dan akses informasi dukungan. Layanan ini bukan pengganti layanan darurat. Lingkup layanan dan kewenangan petugas perlu disahkan oleh institusi." },
@@ -15,42 +16,44 @@ export default function TermsPage() {
   return (
     <div className="terms-page">
       <header className="pub-header">
-        <div className="pub-header-in" style={{ gridTemplateColumns: "1fr auto" }}>
-          <Logo size={26} />
-          <Link href="/register" className="link-arrow"><ArrowLeft aria-hidden /> Kembali ke Register</Link>
+        <div className="pub-header-in">
+          <Logo size={40} />
+          <div className="pub-cta">
+            <QuickExit />
+            <Link href="/register" className="link-teal"><ArrowLeft size={16} aria-hidden style={{ display: "inline", verticalAlign: "-3px" }} /> Kembali ke pendaftaran</Link>
+          </div>
         </div>
       </header>
-      <div className="terms-body">
+      <main id="isi" className="terms-body">
         <div className="terms-head">
           <div>
-            <h1>Syarat dan Ketentuan</h1>
-            <p>Panduan penggunaan SISKA • Versi ilustrasi, Oktober 2026</p>
+            <h1>Syarat dan ketentuan</h1>
+            <p>Panduan penggunaan SISKA. Versi ilustrasi, Oktober 2026.</p>
           </div>
           <PrintButton />
         </div>
-        <div className="note note-warn" style={{ marginTop: 21, borderRadius: 10, padding: "14px 17px" }} role="note">
+        <div className="note note-warn" role="note">
           <Info aria-hidden />
           <div>
-            <b>Draft ilustratif — perlu peninjauan institusi</b>
-            Dokumen ini merupakan contoh isi untuk desain, bukan kebijakan resmi atau persetujuan hukum. Ketentuan, dasar pemrosesan data, dan kontak penanggung jawab harus ditetapkan institusi sebelum publikasi.
+            <b>Draf ilustratif, perlu ditinjau institusi</b>
+            Dokumen ini contoh isi untuk desain, bukan kebijakan resmi atau persetujuan hukum. Ketentuan, dasar pemrosesan data, dan kontak penanggung jawab harus ditetapkan institusi sebelum dipublikasikan.
           </div>
         </div>
         <div className="terms-grid">
-          <aside className="card toc" aria-label="Daftar isi">
+          <nav className="toc" aria-label="Daftar isi">
             <h3>Daftar isi</h3>
-            {sections.map((s) => <a key={s.id} href={`#${s.id}`}>{s.n} &nbsp;{s.t}</a>)}
-            <div className="toc-foot"><span className="chip">Demo • data ilustrasi</span></div>
-          </aside>
-          <article className="card terms-card">
+            {sections.map((s) => <a key={s.id} href={`#${s.id}`}>{s.n.replace(/^0/, "")}. {s.t}</a>)}
+          </nav>
+          <article className="terms-card">
             {sections.map((s) => (
               <section key={s.id} id={s.id}>
-                <h2>{s.n} &nbsp;{s.t}</h2>
+                <h2>{s.n.replace(/^0/, "")}. {s.t}</h2>
                 <p>{s.p}</p>
               </section>
             ))}
           </article>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
