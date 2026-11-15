@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, onSnapshot, orderBy, query, where, type Unsubscribe } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, updateProfile } from "firebase/auth";
@@ -14,8 +14,9 @@ import {
   postConversationMessage, transitionReportStatusByAdmin,
   updateConversationStatusByAdmin, fetchMyProfile, updateMyProfileName,
   fetchKnowledgeDocumentsByAdmin, uploadKnowledgePdfByAdmin, deleteKnowledgeDocumentByAdmin, triggerKnowledgeReindexByAdmin, fetchAuditEventsByAdmin,
-  broadcastNotificationByAdmin,
+  broadcastNotificationByAdmin, markConversationAsRead, markNotificationsReadByTarget, fetchNotifications,
 } from "@/lib/api-client";
+import { useUnreadSummary } from "@/lib/use-unread-summary";
 import type { SerializedReport, SerializedReportDetail, SerializedConversation, SerializedMessage, ReportsSummaryResult, SerializedKnowledgeDocument, SerializedAuditEvent } from "@/types/api";
 import { ALLOWED_STATUS_TRANSITIONS, isStatusNoteRequired, type ReportStatus } from "@/types/domain";
 
@@ -191,6 +192,9 @@ export function LiveHistoryPage({admin=false}:{admin?:boolean}) {
 function Detail({id,admin}:{id:string;admin:boolean}) {
  const [report,setReport]=useState<SerializedReportDetail|null>(null);const [error,setError]=useState("");const [busy,setBusy]=useState(false);const [uploadBusy,setUploadBusy]=useState(false);const [next,setNext]=useState<ReportStatus>("under_review");const [note,setNote]=useState("");
  const load=useCallback(async()=>{try{setError("");const r=await fetchReportDetail(id);setReport(r);setNext(r.status==="submitted"?"under_review":r.status==="under_review"?"in_progress":"resolved");}catch(e){setError(errorText(e));}},[id]);useEffect(()=>{void load();},[load]);
+ // Membuka detail laporan = membaca pembaruannya. Badge sidebar/lonceng turun tanpa menunggu klik lonceng.
+ const reportStatus=report?.status;
+ useEffect(()=>{if(!reportStatus)return;void markNotificationsReadByTarget("report",id).catch(()=>undefined);},[id,reportStatus]);
  async function update(e:React.FormEvent){e.preventDefault();if(!report)return;setBusy(true);setError("");try{await transitionReportStatusByAdmin(id,{status:next,note:note.trim()||undefined});await load();setNote("");}catch(e){setError(errorText(e));}finally{setBusy(false);}}
  async function download(evidenceId:string){try{const {url}=await (await import("@/lib/api-client")).fetchEvidenceSignedDownloadUrl(id,evidenceId);window.open(url,"_blank","noopener,noreferrer");}catch(e){setError(errorText(e));}}
  async function uploadEvidence(file:File){setUploadBusy(true);setError("");try{await uploadEvidenceMultipart(id,file);await load();}catch(e){setError(errorText(e));}finally{setUploadBusy(false);}}
@@ -408,6 +412,50 @@ function ConversationChat({admin}:{admin:boolean}) {
   };
  },[active]);
 
+ // ===== Status baca =====
+ // 1) Membuka percakapan, 2) pesan masuk saat percakapan terbuka, 3) kembali ke tab ini
+ // => semuanya menandai percakapan dibaca di server (receipt + notifikasi), lalu badge disegarkan.
+ const lastMarkedRef=useRef("");
+ const [unreadConversationIds,setUnreadConversationIds]=useState<Set<string>>(new Set());
+ const unreadSummary=useUnreadSummary();
+
+ const markActiveAsRead=useCallback((force=false)=>{
+  if(!active||typeof document==="undefined"||document.visibilityState!=="visible")return;
+  const last=messages[messages.length-1];
+  const key=`${active}:${last?.id??""}`;
+  if(!force&&lastMarkedRef.current===key)return;
+  lastMarkedRef.current=key;
+  setUnreadConversationIds(old=>{if(!old.has(active))return old;const next=new Set(old);next.delete(active);return next;});
+  void markConversationAsRead(active).catch(()=>{lastMarkedRef.current="";});
+ },[active,messages]);
+
+ // Saat percakapan dibuka atau berpindah.
+ useEffect(()=>{lastMarkedRef.current="";markActiveAsRead(true);},[active]); // eslint-disable-line react-hooks/exhaustive-deps
+ // Saat ada pesan masuk dari lawan bicara ketika percakapan sedang terbuka (dibaca langsung).
+ useEffect(()=>{
+  const last=messages[messages.length-1];
+  if(!last||!currentUid||last.senderUid===currentUid)return;
+  markActiveAsRead();
+ },[messages,currentUid,markActiveAsRead]);
+ // Saat pengguna kembali ke tab/jendela ini.
+ useEffect(()=>{
+  const onVisible=()=>markActiveAsRead(true);
+  document.addEventListener("visibilitychange",onVisible);
+  window.addEventListener("focus",onVisible);
+  return()=>{document.removeEventListener("visibilitychange",onVisible);window.removeEventListener("focus",onVisible);};
+ },[markActiveAsRead]);
+
+ // Penanda "Baru" per percakapan di daftar. Sumbernya notifikasi belum dibaca (satu per percakapan).
+ const conversationsSignature=useMemo(()=>conversations.map(item=>`${item.id}:${item.lastMessageAt??item.updatedAt}`).join("|"),[conversations]);
+ useEffect(()=>{
+  let cancelled=false;
+  fetchNotifications({unreadOnly:true,limit:50}).then(page=>{
+   if(cancelled)return;
+   setUnreadConversationIds(new Set(page.items.filter(item=>item.targetType==="conversation"&&item.targetId&&item.targetId!==active).map(item=>item.targetId as string)));
+  }).catch(()=>undefined);
+  return()=>{cancelled=true;};
+ },[conversationsSignature,unreadSummary.chats,active]);
+
  const current=conversations.find(item=>item.id===active);
  const reporterName=current?(reporterNames[current.reporterId]||(admin?"Memuat nama…":"Anda")):"";
 
@@ -455,7 +503,7 @@ function ConversationChat({admin}:{admin:boolean}) {
      const name=admin?(reporterNames[conversation.reporterId]||"Pengguna SISKA"):"Chat dengan Admin";
      const preview=conversation.lastMessage||"Buka untuk melihat pesan";
      return <button key={conversation.id} className={`conv ${active===conversation.id?"active":""}`} aria-current={active===conversation.id?"true":undefined} onClick={()=>setActive(conversation.id)}>
-      <b>{name}</b><small>{preview.length>64?`${preview.slice(0,61)}…`:preview}</small><small>{conversation.status==="open"?"Terbuka":"Ditutup"}, {dateText(conversation.lastMessageAt||conversation.updatedAt)}</small>
+      <b>{name}{unreadConversationIds.has(conversation.id)&&active!==conversation.id&&<span className="conv-badge" style={{marginLeft:8}} aria-label="Ada pesan baru">Baru</span>}</b><small>{preview.length>64?`${preview.slice(0,61)}…`:preview}</small><small>{conversation.status==="open"?"Terbuka":"Ditutup"}, {dateText(conversation.lastMessageAt||conversation.updatedAt)}</small>
      </button>;
     })}
     {!loading&&!conversations.length&&<p className="help">{admin?"Belum ada percakapan masuk.":"Belum ada percakapan. Pilih Percakapan baru untuk menulis ke petugas."}</p>}

@@ -7,6 +7,7 @@
  */
 
 import { auth } from '@/lib/firebase/client';
+import { emitNotificationsChanged } from '@/lib/notification-events';
 import type {
   AiChatResponse,
   ApiErrorBody,
@@ -383,10 +384,12 @@ export async function updateConversationStatusByAdmin(
 export async function markConversationAsRead(
   conversationId: string,
 ): Promise<{ conversationId: string; readAt: string }> {
-  return apiRequest<{ conversationId: string; readAt: string }>(
+  const result = await apiRequest<{ conversationId: string; readAt: string }>(
     `/conversations/${encodeURIComponent(conversationId)}/read`,
     { method: 'POST' },
   );
+  emitNotificationsChanged();
+  return result;
 }
 
 export async function fetchConversationMessages(
@@ -672,20 +675,40 @@ export async function fetchUnreadNotificationCount(): Promise<UnreadNotification
 export async function markNotificationAsRead(
   id: string,
 ): Promise<SerializedNotificationItem> {
-  return apiRequest<SerializedNotificationItem>(
+  const result = await apiRequest<SerializedNotificationItem>(
     `/api/v1/notifications/${encodeURIComponent(id)}/read`,
     {
       method: 'PATCH',
     },
   );
+  emitNotificationsChanged();
+  return result;
 }
 
 export async function markAllNotificationsAsRead(): Promise<{
   markedCount: number;
 }> {
-  return apiRequest<{ markedCount: number }>('/api/v1/notifications/read-all', {
+  const result = await apiRequest<{ markedCount: number }>('/api/v1/notifications/read-all', {
     method: 'PATCH',
   });
+  emitNotificationsChanged();
+  return result;
+}
+
+/**
+ * Tandai notifikasi sebuah target (laporan/edukasi) sebagai dibaca ketika pengguna
+ * benar-benar membukanya. Gagal secara senyap: badge hanya penanda, bukan fungsi inti.
+ */
+export async function markNotificationsReadByTarget(
+  targetType: 'report' | 'education',
+  targetId: string,
+): Promise<{ markedCount: number }> {
+  const result = await apiRequest<{ markedCount: number }>(
+    '/api/v1/notifications/read-by-target',
+    { method: 'PATCH', body: { targetType, targetId } },
+  );
+  if (result.markedCount > 0) emitNotificationsChanged();
+  return result;
 }
 
 export async function broadcastNotificationByAdmin(input: {
@@ -749,6 +772,7 @@ export const siskaApi = {
     unreadCount: fetchUnreadNotificationCount,
     markRead: markNotificationAsRead,
     markAllRead: markAllNotificationsAsRead,
+    markReadByTarget: markNotificationsReadByTarget,
     broadcast: broadcastNotificationByAdmin,
   },
   ai: {

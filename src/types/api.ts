@@ -289,10 +289,21 @@ export interface SerializedNotificationItem {
 export type PaginatedNotificationsResult =
   PaginatedResponse<SerializedNotificationItem>;
 
+/**
+ * Semua hitungan sudah dideduplikasi per sumber:
+ * - `unreadReportCount`       = jumlah LAPORAN berbeda yang punya pembaruan belum dibaca.
+ * - `unreadConversationCount` = jumlah PENGGUNA berbeda yang pesannya belum dibaca
+ *                               (bukan jumlah pesan).
+ * - `unreadCount`             = total badge lonceng (laporan + pengguna + notifikasi lain).
+ */
 export interface UnreadNotificationCountResult {
   unreadCount: number;
   unreadReportCount: number;
   unreadConversationCount: number;
+}
+
+export interface MarkNotificationsByTargetResult {
+  markedCount: number;
 }
 
 export interface BroadcastNotificationResult {

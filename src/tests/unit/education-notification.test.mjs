@@ -31,8 +31,10 @@ import {
   getUnreadNotificationCount,
   markNotificationAsRead,
   markAllNotificationsAsRead,
+  markNotificationsReadByTarget,
   broadcastNotificationByAdmin,
 } from '@/server/services/notification.service';
+import { sendMessage } from '@/server/services/conversation.service';
 import { updateReportStatus } from '@/server/services/report.service';
 
 // Set env emulator default untuk pengujian
@@ -495,4 +497,100 @@ test('NOTIF-09: Target notifikasi harus diarahkan ke halaman yang sesuai per jen
     query: null,
     label: 'Lihat detail',
   });
+});
+
+
+// ── Badge dihitung per PENGGUNA/LAPORAN, bukan per pesan/notifikasi ─────────
+
+test('NOTIF-10: Badge chat = jumlah pengguna berbeda, bukan jumlah pesan; badge laporan = laporan unik', async () => {
+  const base = `users/${CALLER_ADMIN.uid}/notifications`;
+  seedMockDocs([
+    // Pengguna A mengirim 3 notifikasi pesan di 2 percakapan -> 1 pengguna
+    { path: `${base}/a1`, data: { isRead: false, targetType: 'conversation', targetId: 'conv_A_general', senderUid: 'user_A' } },
+    { path: `${base}/a2`, data: { isRead: false, targetType: 'conversation', targetId: 'conv_A_general', senderUid: 'user_A' } },
+    { path: `${base}/a3`, data: { isRead: false, targetType: 'conversation', targetId: 'conv_A_rpt1', senderUid: 'user_A' } },
+    // Pengguna B -> 1 pengguna
+    { path: `${base}/b1`, data: { isRead: false, targetType: 'conversation', targetId: 'conv_B_general', senderUid: 'user_B' } },
+    // Laporan yang sama 2x -> 1 laporan, laporan lain -> 1
+    { path: `${base}/r1`, data: { isRead: false, targetType: 'report', targetId: 'rpt_1' } },
+    { path: `${base}/r2`, data: { isRead: false, targetType: 'report', targetId: 'rpt_1' } },
+    { path: `${base}/r3`, data: { isRead: false, targetType: 'report', targetId: 'rpt_2' } },
+    // Pengumuman -> 1
+    { path: `${base}/s1`, data: { isRead: false, targetType: 'none' } },
+    // Sudah dibaca -> tidak dihitung
+    { path: `${base}/x1`, data: { isRead: true, targetType: 'conversation', targetId: 'conv_C', senderUid: 'user_C' } },
+  ]);
+
+  const result = await getUnreadNotificationCount(CALLER_ADMIN);
+  assert.equal(result.unreadConversationCount, 2);
+  assert.equal(result.unreadReportCount, 2);
+  assert.equal(result.unreadCount, 2 + 2 + 1);
+});
+
+test('NOTIF-11: Pesan beruntun dari satu pelapor menghasilkan satu notifikasi per percakapan (badge tetap 1 pengguna)', async () => {
+  const convId = `conv_${CALLER_REPORTER_1.uid}_general`;
+  seedMockDocs([
+    { path: `users/${CALLER_ADMIN.uid}`, data: { role: 'admin' } },
+    {
+      path: `conversations/${convId}`,
+      data: {
+        type: 'report_admin',
+        reporterId: CALLER_REPORTER_1.uid,
+        assignedAdminId: CALLER_ADMIN.uid,
+        reportId: null,
+        status: 'open',
+        createdAt: new Date('2026-10-10T10:00:00Z'),
+        updatedAt: new Date('2026-10-10T10:00:00Z'),
+      },
+    },
+  ]);
+
+  await sendMessage(CALLER_REPORTER_1, convId, { body: 'Halo 1' });
+  await sendMessage(CALLER_REPORTER_1, convId, { body: 'Halo 2' });
+  await sendMessage(CALLER_REPORTER_1, convId, { body: 'Halo 3' });
+
+  const notifs = listMockCollectionDocs(`users/${CALLER_ADMIN.uid}/notifications`);
+  assert.equal(notifs.length, 1);
+  assert.equal(notifs[0].data.senderUid, CALLER_REPORTER_1.uid);
+
+  const count = await getUnreadNotificationCount(CALLER_ADMIN);
+  assert.equal(count.unreadConversationCount, 1);
+});
+
+test('NOTIF-12: Tandai semua dibaca ikut menggeser read receipt percakapan', async () => {
+  seedMockDocs([
+    {
+      path: `users/${CALLER_ADMIN.uid}/notifications/chat_conv_X`,
+      data: { isRead: false, targetType: 'conversation', targetId: 'conv_X', senderUid: 'user_X' },
+    },
+    {
+      path: `users/${CALLER_ADMIN.uid}/notifications/n_report`,
+      data: { isRead: false, targetType: 'report', targetId: 'rpt_9' },
+    },
+  ]);
+
+  await markAllNotificationsAsRead(CALLER_ADMIN);
+
+  const receipt = getMockDoc(`conversations/conv_X/readReceipts/${CALLER_ADMIN.uid}`);
+  assert.ok(receipt, 'receipt percakapan harus dibuat');
+  assert.equal(receipt.uid, CALLER_ADMIN.uid);
+  assert.ok(receipt.readAt);
+  assert.equal((await getUnreadNotificationCount(CALLER_ADMIN)).unreadCount, 0);
+});
+
+test('NOTIF-13: Membuka laporan menandai seluruh notifikasi laporan tsb sebagai dibaca, milik sendiri saja', async () => {
+  seedMockDocs([
+    { path: `users/${CALLER_REPORTER_1.uid}/notifications/n1`, data: { isRead: false, targetType: 'report', targetId: 'rpt_1' } },
+    { path: `users/${CALLER_REPORTER_1.uid}/notifications/n2`, data: { isRead: false, targetType: 'report', targetId: 'rpt_1' } },
+    { path: `users/${CALLER_REPORTER_1.uid}/notifications/n3`, data: { isRead: false, targetType: 'report', targetId: 'rpt_2' } },
+    { path: `users/${CALLER_REPORTER_2.uid}/notifications/n4`, data: { isRead: false, targetType: 'report', targetId: 'rpt_1' } },
+  ]);
+
+  const result = await markNotificationsReadByTarget(CALLER_REPORTER_1, { targetType: 'report', targetId: 'rpt_1' });
+  assert.equal(result.markedCount, 2);
+
+  const after = await getUnreadNotificationCount(CALLER_REPORTER_1);
+  assert.equal(after.unreadReportCount, 1); // rpt_2 masih belum dibaca
+  // Notifikasi milik reporter lain tidak tersentuh
+  assert.equal((await getUnreadNotificationCount(CALLER_REPORTER_2)).unreadReportCount, 1);
 });

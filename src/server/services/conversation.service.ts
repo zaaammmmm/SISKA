@@ -405,8 +405,11 @@ export async function sendMessage(
       ? [recipientUid]
       : (unassignedAdminUsers?.docs ?? []).map((adminUser) => adminUser.id);
     for (const targetUid of notificationRecipients) {
+      // ID deterministik: satu notifikasi per percakapan per penerima. Pesan berikutnya
+      // memperbarui notifikasi yang sama (kembali "belum dibaca" + naik ke atas daftar)
+      // sehingga lonceng tidak dibanjiri satu item per pesan.
       const notifRef = db.collection('users').doc(targetUid)
-        .collection('notifications').doc();
+        .collection('notifications').doc(`chat_${conversationId}`);
       tx.set(notifRef, {
         recipientUid: targetUid,
         type: 'new_chat_message',
@@ -414,6 +417,8 @@ export async function sendMessage(
         body: 'Anda menerima pesan baru pada ruang percakapan SISKA.',
         targetType: 'conversation',
         targetId: conversationId,
+        // Dipakai badge untuk menghitung jumlah pengguna, bukan jumlah pesan.
+        senderUid: authorized.uid,
         isRead: false,
         readAt: null,
         createdAt: now,

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { signOut } from "firebase/auth";
 import {
   BookOpen, Bot, ChevronDown, Copy, FilePlus2, Headset, LayoutGrid, LogOut, Menu, FileText,
   MessagesSquare, SlidersHorizontal, UserRound,
@@ -10,9 +10,9 @@ import {
 import { Logo } from "@/components/logo";
 import { NotificationCenter } from "@/components/notification-center";
 import { QuickExit } from "@/components/quick-exit";
-import { fetchUnreadNotificationCount } from "@/lib/api-client";
 import { auth } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/use-current-user";
+import { useUnreadSummary } from "@/lib/use-unread-summary";
 
 type Role = "user" | "admin";
 
@@ -40,7 +40,8 @@ export function AppShell({ role, children }: { role: Role; children: React.React
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
-  const [navUnread, setNavUnread] = useState({ reports: 0, chats: 0 });
+  // Badge sidebar memakai sumber yang sama dengan lonceng: laporan unik + pengguna unik.
+  const unread = useUnreadSummary();
   const menuRef = useRef<HTMLDivElement>(null);
   const admin = role === "admin";
   const me = useCurrentUser(admin ? "Petugas" : "Pengguna");
@@ -51,60 +52,6 @@ export function AppShell({ role, children }: { role: Role; children: React.React
     const close = (e: MouseEvent) => menuRef.current && !menuRef.current.contains(e.target as Node) && setMenu(false);
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
-  }, []);
-
-  useEffect(() => {
-    const firebaseAuth = auth;
-    if (!firebaseAuth) {
-      setNavUnread({ reports: 0, chats: 0 });
-      return;
-    }
-
-    let active = true;
-    let timer: ReturnType<typeof setInterval> | undefined;
-
-    // Gunakan endpoint yang sama dengan badge notifikasi agar kegagalan API
-    // daftar percakapan tidak ikut menghilangkan badge laporan maupun chat.
-    const refresh = async (requestedUid: string) => {
-      if (!active || firebaseAuth.currentUser?.uid !== requestedUid) return;
-      try {
-        const result = await fetchUnreadNotificationCount();
-        // Abaikan respons lama jika sesi berubah saat request berlangsung.
-        if (!active || firebaseAuth.currentUser?.uid !== requestedUid) return;
-        setNavUnread({
-          reports: result.unreadReportCount ?? 0,
-          chats: result.unreadConversationCount ?? 0,
-        });
-      } catch {
-        // Pertahankan count terakhir saat API sementara gagal.
-      }
-    };
-
-    const unsubscribeAuth = onAuthStateChanged(firebaseAuth, (user) => {
-      if (timer) clearInterval(timer);
-      timer = undefined;
-
-      if (!user) {
-        setNavUnread({ reports: 0, chats: 0 });
-        return;
-      }
-
-      void refresh(user.uid);
-      timer = setInterval(() => void refresh(user.uid), 15_000);
-    });
-
-    const handleFocus = () => {
-      const uid = firebaseAuth.currentUser?.uid;
-      if (uid) void refresh(uid);
-    };
-    window.addEventListener("focus", handleFocus);
-
-    return () => {
-      active = false;
-      unsubscribeAuth();
-      if (timer) clearInterval(timer);
-      window.removeEventListener("focus", handleFocus);
-    };
   }, []);
 
   async function logout() {
@@ -125,14 +72,12 @@ export function AppShell({ role, children }: { role: Role; children: React.React
           {NAV[role].map((n) => (
             <Link key={n.href} href={n.href} className={isActive(n) ? "active" : ""} aria-current={isActive(n) ? "page" : undefined}>
               <n.icon aria-hidden /> <span>{n.label}</span>
-              {((n.href.endsWith("/reports") && navUnread.reports > 0) ||
-                (n.href.endsWith("/chat") && navUnread.chats > 0)) && (
-                <span className="nav-unread-badge" aria-label={`${n.href.endsWith("/chat") ? navUnread.chats : navUnread.reports} belum dibaca`}>
-                  {(n.href.endsWith("/chat") ? navUnread.chats : navUnread.reports) > 99
-                    ? "99+"
-                    : n.href.endsWith("/chat") ? navUnread.chats : navUnread.reports}
-                </span>
-              )}
+              {(() => {
+                const count = n.href.endsWith("/chat") ? unread.chats : n.href.endsWith("/reports") ? unread.reports : 0;
+                if (count <= 0) return null;
+                const label = n.href.endsWith("/chat") ? `${count} pengguna dengan pesan belum dibaca` : `${count} laporan dengan pembaruan belum dibaca`;
+                return <span className="nav-unread-badge" aria-label={label}>{count > 99 ? "99+" : count}</span>;
+              })()}
             </Link>
           ))}
         </nav>

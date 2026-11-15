@@ -1,6 +1,7 @@
 import { ApiError } from '@/server/errors/api-error';
 import {
   assertAllowlistedKeys,
+  validateResourceId,
   validatePaginationParams,
   validateOptionalString,
   validateRequiredString,
@@ -95,5 +96,30 @@ export function validateBroadcastNotificationInput(
     targetType,
     targetId,
     targetRole,
+  };
+}
+
+// ── Tandai notifikasi dibaca berdasarkan target (aksi pengguna: buka laporan/edukasi) ──
+export const READ_BY_TARGET_TYPES = ['report', 'education'] as const;
+export type ReadByTargetType = (typeof READ_BY_TARGET_TYPES)[number];
+
+export interface MarkReadByTargetInput {
+  targetType: ReadByTargetType;
+  targetId: string;
+}
+
+export function validateMarkReadByTargetInput(
+  payload: Record<string, unknown>,
+): MarkReadByTargetInput {
+  assertAllowlistedKeys(payload, ['targetType', 'targetId'], 'penandaan notifikasi dibaca');
+
+  if (!READ_BY_TARGET_TYPES.includes(payload.targetType as ReadByTargetType)) {
+    const msg = `Field 'targetType' harus salah satu dari: ${READ_BY_TARGET_TYPES.join(', ')}.`;
+    throw ApiError.validation(msg, { targetType: msg });
+  }
+
+  return {
+    targetType: payload.targetType as ReadByTargetType,
+    targetId: validateResourceId(payload.targetId, 'targetId'),
   };
 }

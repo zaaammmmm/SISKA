@@ -21,9 +21,11 @@ import { recordAuditEvent } from '@/server/services/audit.service';
 import type {
   BroadcastNotificationInput,
   ListNotificationsQuery,
+  MarkReadByTargetInput,
 } from '@/server/validators/notification.validator';
 import type {
   BroadcastNotificationResult,
+  MarkNotificationsByTargetResult,
   PaginatedNotificationsResult,
   SerializedNotificationItem,
   UnreadNotificationCountResult,
@@ -59,6 +61,7 @@ export interface CreateNotificationParams {
   body: string;
   targetType?: NotificationTargetType;
   targetId?: string | null;
+  senderUid?: string | null;
   batch?: WriteBatch;
   transaction?: Transaction;
 }
@@ -86,6 +89,7 @@ export async function createNotification(
     body: params.body,
     targetType: params.targetType ?? 'none',
     targetId: params.targetId ?? null,
+    senderUid: params.senderUid ?? null,
     isRead: false,
     readAt: null,
     createdAt: now,
@@ -156,7 +160,12 @@ export async function listUserNotifications(
 }
 
 /**
- * Menghitung jumlah notifikasi yang belum dibaca untuk badge lonceng topbar.
+ * Menghitung badge notifikasi yang belum dibaca (lonceng topbar + badge sidebar).
+ *
+ * Hitungan DIDEDUPLIKASI per sumber, bukan per dokumen notifikasi:
+ * - laporan   : 1 per laporan berbeda (status berubah 3x di laporan yang sama = 1).
+ * - percakapan: 1 per PENGGUNA berbeda (pelapor dengan 20 pesan belum dibaca = 1).
+ * - lainnya   : 1 per notifikasi (pengumuman, dsb.).
  */
 export async function getUnreadNotificationCount(
   caller: AuthenticatedCaller,
@@ -171,11 +180,31 @@ export async function getUnreadNotificationCount(
     .where('isRead', '==', false)
     .get();
 
-  const unreadDocs = snapshot.docs;
+  const reportTargets = new Set<string>();
+  const chatSources = new Set<string>();
+  let otherCount = 0;
+
+  for (const doc of snapshot.docs) {
+    const data = doc.data() ?? {};
+    const targetId = typeof data.targetId === 'string' && data.targetId ? data.targetId : null;
+
+    if (data.targetType === 'report') {
+      // Tanpa targetId tetap terhitung (per notifikasi) agar tidak hilang dari badge.
+      reportTargets.add(targetId ?? `notif:${doc.id}`);
+    } else if (data.targetType === 'conversation') {
+      const senderUid =
+        typeof data.senderUid === 'string' && data.senderUid ? data.senderUid : null;
+      // Notifikasi lama tanpa senderUid dihitung per percakapan.
+      chatSources.add(senderUid ? `user:${senderUid}` : `conv:${targetId ?? doc.id}`);
+    } else {
+      otherCount += 1;
+    }
+  }
+
   return {
-    unreadCount: unreadDocs.length,
-    unreadReportCount: unreadDocs.filter((doc) => doc.data()?.targetType === 'report').length,
-    unreadConversationCount: unreadDocs.filter((doc) => doc.data()?.targetType === 'conversation').length,
+    unreadCount: reportTargets.size + chatSources.size + otherCount,
+    unreadReportCount: reportTargets.size,
+    unreadConversationCount: chatSources.size,
   };
 }
 
@@ -237,6 +266,17 @@ export async function markAllNotificationsAsRead(
   }
 
   const now = new Date();
+
+  // Chat yang ikut ditandai dibaca harus ikut menggeser receipt percakapan; kalau tidak,
+  // daftar chat masih menampilkan "N belum dibaca" padahal lonceng sudah 0.
+  const conversationIds = new Set<string>();
+  for (const doc of snapshot.docs) {
+    const data = doc.data() ?? {};
+    if (data.targetType === 'conversation' && typeof data.targetId === 'string' && data.targetId) {
+      conversationIds.add(data.targetId);
+    }
+  }
+
   // Firestore membatasi maksimal 500 operasi per batch. Pecah menjadi
   // chunk 400 agar mark-all tetap berhasil untuk akun dengan notifikasi banyak.
   const CHUNK_SIZE = 400;
@@ -251,7 +291,61 @@ export async function markAllNotificationsAsRead(
     await batch.commit();
   }
 
+  const receiptIds = Array.from(conversationIds);
+  for (let i = 0; i < receiptIds.length; i += CHUNK_SIZE) {
+    const batch = db.batch();
+    for (const conversationId of receiptIds.slice(i, i + CHUNK_SIZE)) {
+      batch.set(
+        db.collection('conversations').doc(conversationId)
+          .collection('readReceipts').doc(authorized.uid),
+        { uid: authorized.uid, readAt: now, updatedAt: now },
+      );
+    }
+    await batch.commit();
+  }
+
   return { markedCount: snapshot.docs.length };
+}
+
+/**
+ * Menandai semua notifikasi belum dibaca untuk satu target sebagai dibaca
+ * (`PATCH /api/v1/notifications/read-by-target`).
+ * Dipanggil saat pengguna melakukan aksi langsung, mis. membuka detail laporan,
+ * sehingga badge turun tanpa harus membuka lonceng. Hanya menyentuh notifikasi milik caller.
+ */
+export async function markNotificationsReadByTarget(
+  caller: AuthenticatedCaller,
+  input: MarkReadByTargetInput,
+): Promise<MarkNotificationsByTargetResult> {
+  const authorized = requireRole(caller, ['reporter', 'admin']);
+  const db = getAdminDb();
+
+  const snapshot = await db
+    .collection('users')
+    .doc(authorized.uid)
+    .collection('notifications')
+    .where('targetId', '==', input.targetId)
+    .get();
+
+  const unread = snapshot.docs.filter(
+    (doc) => {
+      const data = doc.data() ?? {};
+      return data.targetType === input.targetType && data.isRead === false;
+    },
+  );
+  if (unread.length === 0) return { markedCount: 0 };
+
+  const now = new Date();
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < unread.length; i += CHUNK_SIZE) {
+    const batch = db.batch();
+    for (const doc of unread.slice(i, i + CHUNK_SIZE)) {
+      batch.update(doc.ref, { isRead: true, readAt: now });
+    }
+    await batch.commit();
+  }
+
+  return { markedCount: unread.length };
 }
 
 /**
