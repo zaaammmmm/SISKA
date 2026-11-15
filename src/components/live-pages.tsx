@@ -124,7 +124,7 @@ export function LiveNewReportPage() {
   return (
     <AppShell role="user">
       <Head title="Buat laporan" subtitle="Tulis seperlunya. Kamu bisa menambahkan bukti nanti lewat halaman detail laporan."/>
-      <form className="card" onSubmit={submit} style={{maxWidth:820}}>
+      <form className="card" onSubmit={submit} style={{ width: "100%" }}>
         <div className="note" role="note">
           <div>
             <b>Hanya dua isian yang wajib: kategori dan apa yang terjadi.</b>
