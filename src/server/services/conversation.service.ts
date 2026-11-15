@@ -10,7 +10,7 @@
 
 import type { DocumentData } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebase/admin';
-import { toIsoDateString } from '@/lib/firebase/firestore';
+import { toIsoDateString, toIsoStringOrNull } from '@/lib/firebase/firestore';
 import {
   assertCanAccessConversation,
   assertCanReadReport,
@@ -438,7 +438,7 @@ export async function sendMessage(
 export async function markConversationAsRead(
   caller: AuthenticatedCaller,
   conversationId: string,
-): Promise<{ conversationId: string; readAt: string }> {
+): Promise<{ conversationId: string; readAt: string; previousReadAt: string | null }> {
   const db = getAdminDb();
   const conversationRef = db.collection('conversations').doc(conversationId);
   const conversationSnap = await conversationRef.get();
@@ -447,7 +447,14 @@ export async function markConversationAsRead(
     : null;
   assertCanAccessConversation(caller, conversation, 'read');
   const now = new Date();
-  await conversationRef.collection('readReceipts').doc(caller.uid).set({
+  const receiptRef = conversationRef.collection('readReceipts').doc(caller.uid);
+  // Waktu baca sebelumnya dikembalikan agar UI bisa memasang pembatas "N pesan belum terbaca"
+  // tepat di antara pesan lama dan pesan yang baru dibuka.
+  const previousReceipt = await receiptRef.get();
+  const previousReadAt = previousReceipt.exists
+    ? toIsoStringOrNull(previousReceipt.data()?.readAt)
+    : null;
+  await receiptRef.set({
     uid: caller.uid,
     readAt: now,
     updatedAt: now,
@@ -470,7 +477,7 @@ export async function markConversationAsRead(
     await batch.commit();
   }
 
-  return { conversationId, readAt: now.toISOString() };
+  return { conversationId, readAt: now.toISOString(), previousReadAt };
 }
 
 /**

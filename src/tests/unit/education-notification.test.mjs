@@ -34,7 +34,7 @@ import {
   markNotificationsReadByTarget,
   broadcastNotificationByAdmin,
 } from '@/server/services/notification.service';
-import { sendMessage } from '@/server/services/conversation.service';
+import { sendMessage, markConversationAsRead } from '@/server/services/conversation.service';
 import { updateReportStatus } from '@/server/services/report.service';
 
 // Set env emulator default untuk pengujian
@@ -593,4 +593,30 @@ test('NOTIF-13: Membuka laporan menandai seluruh notifikasi laporan tsb sebagai 
   assert.equal(after.unreadReportCount, 1); // rpt_2 masih belum dibaca
   // Notifikasi milik reporter lain tidak tersentuh
   assert.equal((await getUnreadNotificationCount(CALLER_REPORTER_2)).unreadReportCount, 1);
+});
+
+test('CHAT-READ: markConversationAsRead mengembalikan previousReadAt untuk pembatas pesan belum terbaca', async () => {
+  const convId = `conv_${CALLER_REPORTER_1.uid}_general`;
+  seedMockDocs([
+    {
+      path: `conversations/${convId}`,
+      data: {
+        type: 'report_admin',
+        reporterId: CALLER_REPORTER_1.uid,
+        assignedAdminId: CALLER_ADMIN.uid,
+        reportId: null,
+        status: 'open',
+        createdAt: new Date('2026-10-10T10:00:00Z'),
+        updatedAt: new Date('2026-10-10T10:00:00Z'),
+      },
+    },
+  ]);
+
+  // Pertama kali dibuka: belum pernah dibaca -> semua pesan lawan dianggap belum terbaca
+  const first = await markConversationAsRead(CALLER_ADMIN, convId);
+  assert.equal(first.previousReadAt, null);
+
+  // Dibuka lagi: batasnya adalah waktu baca sebelumnya
+  const second = await markConversationAsRead(CALLER_ADMIN, convId);
+  assert.equal(second.previousReadAt, first.readAt);
 });

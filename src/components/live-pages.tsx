@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, onSnapshot, orderBy, query, where, type Unsubscribe } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, updateProfile } from "firebase/auth";
@@ -14,7 +14,7 @@ import {
   postConversationMessage, transitionReportStatusByAdmin,
   updateConversationStatusByAdmin, fetchMyProfile, updateMyProfileName,
   fetchKnowledgeDocumentsByAdmin, uploadKnowledgePdfByAdmin, deleteKnowledgeDocumentByAdmin, triggerKnowledgeReindexByAdmin, fetchAuditEventsByAdmin,
-  broadcastNotificationByAdmin, markConversationAsRead, markNotificationsReadByTarget, fetchNotifications,
+  broadcastNotificationByAdmin, markConversationAsRead, markNotificationsReadByTarget, fetchConversations,
 } from "@/lib/api-client";
 import { useUnreadSummary } from "@/lib/use-unread-summary";
 import type { SerializedReport, SerializedReportDetail, SerializedConversation, SerializedMessage, ReportsSummaryResult, SerializedKnowledgeDocument, SerializedAuditEvent } from "@/types/api";
@@ -273,6 +273,8 @@ function ConversationChat({admin}:{admin:boolean}) {
  const [conversations,setConversations]=useState<SerializedConversation[]>([]);
  const [active,setActive]=useState("");
  const [messages,setMessages]=useState<SerializedMessage[]>([]);
+ // Percakapan pemilik `messages` saat ini. Mencegah pesan percakapan lama dianggap milik percakapan baru.
+ const [messagesConv,setMessagesConv]=useState("");
  const [reporterNames,setReporterNames]=useState<Record<string,string>>({});
  const [currentUid,setCurrentUid]=useState("");
  const [text,setText]=useState("");
@@ -390,15 +392,15 @@ function ConversationChat({admin}:{admin:boolean}) {
 
  // Pesan percakapan aktif: Firestore snapshot menjadi satu-satunya sumber state pesan.
  useEffect(()=>{
-  if(!db||!active){setMessages([]);return;}
-  setMessages([]);
+  if(!db||!active){setMessages([]);setMessagesConv("");return;}
+  setMessages([]);setMessagesConv("");
   const messagesQuery=query(collection(db,"conversations",active,"messages"),orderBy("createdAt","asc"));
   const unsubscribe=onSnapshot(messagesQuery,snapshot=>{
    const items=snapshot.docs.map(item=>{
     const data=item.data();
     return {id:item.id,senderUid:String(data.senderUid??""),body:String(data.body??""),createdAt:firestoreDate(data.createdAt),attachmentPath:typeof data.attachmentPath==="string"?data.attachmentPath:null,readByRecipient:data.readByRecipient===true};
    });
-   setMessages(items);
+   setMessages(items);setMessagesConv(active);
   },listenerError=>{
    if(!auth?.currentUser)return;
    console.error(`[SISKA CHAT] Messages listener (${active}):`,listenerError);
@@ -416,7 +418,12 @@ function ConversationChat({admin}:{admin:boolean}) {
  // 1) Membuka percakapan, 2) pesan masuk saat percakapan terbuka, 3) kembali ke tab ini
  // => semuanya menandai percakapan dibaca di server (receipt + notifikasi), lalu badge disegarkan.
  const lastMarkedRef=useRef("");
- const [unreadConversationIds,setUnreadConversationIds]=useState<Set<string>>(new Set());
+ // Batas pesan lama/baru: dihitung dari waktu baca SEBELUM percakapan dibuka (dikirim server),
+ // lalu dibekukan selama percakapan terbuka agar pembatas tidak bergeser saat pesan baru masuk.
+ const pendingBoundaryRef=useRef("");
+ const [readBoundary,setReadBoundary]=useState<{conversationId:string;prevMs:number;openMs:number}|null>(null);
+ // Jumlah pesan belum dibaca per percakapan (id -> jumlah pesan dari lawan bicara).
+ const [unreadByConversation,setUnreadByConversation]=useState<Record<string,number>>({});
  const unreadSummary=useUnreadSummary();
 
  const markActiveAsRead=useCallback((force=false)=>{
@@ -425,12 +432,27 @@ function ConversationChat({admin}:{admin:boolean}) {
   const key=`${active}:${last?.id??""}`;
   if(!force&&lastMarkedRef.current===key)return;
   lastMarkedRef.current=key;
-  setUnreadConversationIds(old=>{if(!old.has(active))return old;const next=new Set(old);next.delete(active);return next;});
-  void markConversationAsRead(active).catch(()=>{lastMarkedRef.current="";});
+  setUnreadByConversation(old=>{if(!old[active])return old;const next={...old};delete next[active];return next;});
+  // Hanya panggilan pertama sejak percakapan dibuka yang menentukan batas pesan belum terbaca.
+  const captureFor=pendingBoundaryRef.current===active?active:"";
+  if(captureFor)pendingBoundaryRef.current="";
+  void markConversationAsRead(active).then(result=>{
+   if(!captureFor)return;
+   setReadBoundary({
+    conversationId:captureFor,
+    prevMs:result.previousReadAt?new Date(result.previousReadAt).getTime():0,
+    openMs:new Date(result.readAt).getTime(),
+   });
+  }).catch(()=>{lastMarkedRef.current="";if(captureFor)pendingBoundaryRef.current=captureFor;});
  },[active,messages]);
 
  // Saat percakapan dibuka atau berpindah.
- useEffect(()=>{lastMarkedRef.current="";markActiveAsRead(true);},[active]); // eslint-disable-line react-hooks/exhaustive-deps
+ useEffect(()=>{
+  lastMarkedRef.current="";
+  pendingBoundaryRef.current=active;
+  setReadBoundary(null);
+  markActiveAsRead(true);
+ },[active]); // eslint-disable-line react-hooks/exhaustive-deps
  // Saat ada pesan masuk dari lawan bicara ketika percakapan sedang terbuka (dibaca langsung).
  useEffect(()=>{
   const last=messages[messages.length-1];
@@ -445,16 +467,87 @@ function ConversationChat({admin}:{admin:boolean}) {
   return()=>{document.removeEventListener("visibilitychange",onVisible);window.removeEventListener("focus",onVisible);};
  },[markActiveAsRead]);
 
- // Penanda "Baru" per percakapan di daftar. Sumbernya notifikasi belum dibaca (satu per percakapan).
+ // Jumlah pesan belum dibaca per percakapan, supaya admin tahu tiap pengguna mengirim berapa pesan.
+ // Sumber kebenarannya server (receipt baca per UID). Disegarkan saat ada pesan baru di daftar
+ // percakapan (listener Firestore), saat badge global berubah, dan saat berpindah percakapan.
  const conversationsSignature=useMemo(()=>conversations.map(item=>`${item.id}:${item.lastMessageAt??item.updatedAt}`).join("|"),[conversations]);
  useEffect(()=>{
+  if(!currentUid)return;
   let cancelled=false;
-  fetchNotifications({unreadOnly:true,limit:50}).then(page=>{
-   if(cancelled)return;
-   setUnreadConversationIds(new Set(page.items.filter(item=>item.targetType==="conversation"&&item.targetId&&item.targetId!==active).map(item=>item.targetId as string)));
-  }).catch(()=>undefined);
-  return()=>{cancelled=true;};
- },[conversationsSignature,unreadSummary.chats,active]);
+  const timer=setTimeout(()=>{
+   fetchConversations().then(result=>{
+    if(cancelled)return;
+    const next:Record<string,number>={};
+    for(const item of result.items){
+     // Percakapan yang sedang dibuka sedang/sudah ditandai dibaca; jangan tampilkan angka untuknya.
+     if(item.id!==active&&(item.unreadCount??0)>0)next[item.id]=item.unreadCount;
+    }
+    setUnreadByConversation(next);
+   }).catch(()=>undefined);
+  },250); // gabungkan pesan beruntun menjadi satu request
+  return()=>{cancelled=true;clearTimeout(timer);};
+ },[conversationsSignature,unreadSummary.chats,active,currentUid]);
+
+
+ // ===== Pembatas "N pesan belum terbaca" =====
+ // Pesan lawan bicara yang dikirim setelah terakhir kali percakapan dibaca, sampai saat dibuka.
+ const unreadMarker=useMemo(()=>{
+  if(!readBoundary||readBoundary.conversationId!==active||messagesConv!==active)return null;
+  const unread=messages.filter(message=>{
+   if(message.senderUid===currentUid)return false;
+   const at=new Date(message.createdAt).getTime();
+   return at>readBoundary.prevMs&&at<=readBoundary.openMs;
+  });
+  return unread.length?{firstId:unread[0].id,count:unread.length}:null;
+ },[readBoundary,active,messagesConv,messages,currentUid]);
+
+ // ===== Auto-scroll ke pesan terbaru =====
+ const bodyRef=useRef<HTMLDivElement>(null);
+ const stickRef=useRef(true);          // pengguna sedang berada di dasar chat
+ const scrolledForRef=useRef("");      // percakapan yang sudah di-scroll ke dasar saat dibuka
+ const lastSeenMessageRef=useRef("");
+ const [newBelow,setNewBelow]=useState(0);
+
+ const scrollToBottom=useCallback((smooth=false)=>{
+  const el=bodyRef.current;
+  if(!el)return;
+  el.scrollTo({top:el.scrollHeight,behavior:smooth?"smooth":"auto"});
+  stickRef.current=true;
+  setNewBelow(0);
+ },[]);
+
+ const onBodyScroll=useCallback(()=>{
+  const el=bodyRef.current;
+  if(!el)return;
+  const nearBottom=el.scrollHeight-el.scrollTop-el.clientHeight<120;
+  stickRef.current=nearBottom;
+  if(nearBottom)setNewBelow(count=>count?0:count);
+ },[]);
+
+ // Pindah percakapan: kembali ke mode "ikuti pesan terbaru".
+ useEffect(()=>{stickRef.current=true;setNewBelow(0);lastSeenMessageRef.current="";scrolledForRef.current="";},[active]);
+
+ useEffect(()=>{
+  if(!active||messagesConv!==active||!messages.length)return;
+  const last=messages[messages.length-1];
+  if(scrolledForRef.current!==active){
+   // Pertama kali pesan percakapan ini tampil: langsung ke dasar tanpa animasi.
+   scrolledForRef.current=active;
+   lastSeenMessageRef.current=last.id;
+   requestAnimationFrame(()=>scrollToBottom(false));
+   return;
+  }
+  if(last.id===lastSeenMessageRef.current)return;
+  lastSeenMessageRef.current=last.id;
+  // Pesan sendiri atau pengguna sedang di dasar: ikuti. Kalau sedang membaca pesan lama: jangan loncat.
+  if(last.senderUid===currentUid||stickRef.current)requestAnimationFrame(()=>scrollToBottom(true));
+  else setNewBelow(count=>count+1);
+ },[messages,messagesConv,active,currentUid,scrollToBottom]);
+
+ // Pembatas muncul setelah respons server dan menambah tinggi konten di atas; jaga posisi tetap di dasar.
+ useEffect(()=>{
+  if(unreadMarker&&stickRef.current)requestAnimationFrame(()=>scrollToBottom(false));
+ },[unreadMarker?.firstId,scrollToBottom]); // eslint-disable-line react-hooks/exhaustive-deps
 
  const current=conversations.find(item=>item.id===active);
  const reporterName=current?(reporterNames[current.reporterId]||(admin?"Memuat nama…":"Anda")):"";
@@ -502,8 +595,9 @@ function ConversationChat({admin}:{admin:boolean}) {
     {conversations.map(conversation=>{
      const name=admin?(reporterNames[conversation.reporterId]||"Pengguna SISKA"):"Chat dengan Admin";
      const preview=conversation.lastMessage||"Buka untuk melihat pesan";
+     const unread=active===conversation.id?0:(unreadByConversation[conversation.id]??0);
      return <button key={conversation.id} className={`conv ${active===conversation.id?"active":""}`} aria-current={active===conversation.id?"true":undefined} onClick={()=>setActive(conversation.id)}>
-      <b>{name}{unreadConversationIds.has(conversation.id)&&active!==conversation.id&&<span className="conv-badge" style={{marginLeft:8}} aria-label="Ada pesan baru">Baru</span>}</b><small>{preview.length>64?`${preview.slice(0,61)}…`:preview}</small><small>{conversation.status==="open"?"Terbuka":"Ditutup"}, {dateText(conversation.lastMessageAt||conversation.updatedAt)}</small>
+      <span className="conv-row"><b className={unread?"unread":undefined}>{name}</b>{unread>0&&<span className="conv-count" aria-label={`${unread} pesan belum dibaca`}>{unread>99?"99+":unread}</span>}</span><small>{preview.length>64?`${preview.slice(0,61)}…`:preview}</small><small>{conversation.status==="open"?"Terbuka":"Ditutup"}, {dateText(conversation.lastMessageAt||conversation.updatedAt)}</small>
      </button>;
     })}
     {!loading&&!conversations.length&&<p className="help">{admin?"Belum ada percakapan masuk.":"Belum ada percakapan. Pilih Percakapan baru untuk menulis ke petugas."}</p>}
@@ -513,14 +607,18 @@ function ConversationChat({admin}:{admin:boolean}) {
     <div className="chat-head"><b>{current?(admin?reporterName:"Chat dengan Admin"):"Percakapan SISKA"}</b><div className="row">
      {admin&&current&&<button className="btn btn-outline btn-sm" disabled={statusBusy} onClick={()=>void toggleStatus()}>{current.status==="open"?"Tutup percakapan":"Buka kembali"}</button>}
     </div></div>
-    <div className="chat-body" role="log" aria-live="polite" aria-label="Pesan">
+    <div className="chat-body" role="log" aria-live="polite" aria-label="Pesan" ref={bodyRef} onScroll={onBodyScroll}>
      {messages.map(message=>{
       const isReporter=message.senderUid===current?.reporterId;
       const isMine=message.senderUid===currentUid;
       const author=isReporter?(admin?reporterName:"Anda"):"Admin SISKA";
-      return <div key={message.id} className={`bubble ${isMine?"me":"them"}`}><div className="who">{author}<span>{dateText(message.createdAt)}</span></div>{message.body}</div>;
+      return <Fragment key={message.id}>
+       {unreadMarker?.firstId===message.id&&<div className="unread-divider" role="separator" aria-label={`${unreadMarker.count} pesan belum terbaca`}><span>{unreadMarker.count} pesan belum terbaca</span></div>}
+       <div className={`bubble ${isMine?"me":"them"}`}><div className="who">{author}<span>{dateText(message.createdAt)}</span></div>{message.body}</div>
+      </Fragment>;
      })}
      {!messages.length&&<p className="help">{current?"Belum ada pesan. Mulai percakapan dengan mengirim pesan.":"Pilih percakapan untuk melihat pesan."}</p>}
+     {newBelow>0&&<button type="button" className="jump-latest" onClick={()=>scrollToBottom(true)}>↓ {newBelow} pesan baru</button>}
     </div>
     <form className="compose" onSubmit={send}><div className="compose-row"><input type="text" aria-label="Tulis pesan" value={text} onChange={event=>setText(event.target.value)} maxLength={10000} placeholder={current?.status==="closed"?"Percakapan ini sudah ditutup":"Tulis pesan…"} disabled={!current||current.status==="closed"||busy}/><button className="btn btn-primary btn-sm" disabled={!current||current.status==="closed"||busy||!text.trim()}>Kirim</button></div></form>
    </section>

@@ -383,8 +383,8 @@ export async function updateConversationStatusByAdmin(
 
 export async function markConversationAsRead(
   conversationId: string,
-): Promise<{ conversationId: string; readAt: string }> {
-  const result = await apiRequest<{ conversationId: string; readAt: string }>(
+): Promise<{ conversationId: string; readAt: string; previousReadAt: string | null }> {
+  const result = await apiRequest<{ conversationId: string; readAt: string; previousReadAt: string | null }>(
     `/conversations/${encodeURIComponent(conversationId)}/read`,
     { method: 'POST' },
   );
