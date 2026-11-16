@@ -2,7 +2,7 @@
   "name": "siska",
   "version": "1.0.0",
   "private": true,
-  "description": "SISKA (Sistem Pengaduan Kekerasan Seksual) \u2014 Next.js App Router + Firebase Backend & Emulator Seeder",
+  "description": "SISKA (Sistem Pengaduan Kekerasan Seksual) — Next.js App Router + Firebase Backend & Emulator Seeder",
   "engines": {
     "node": ">=18"
   },
@@ -28,19 +28,19 @@
     "firebase": "^11.8.1",
     "firebase-admin": "^13.0.0",
     "lucide-react": "^0.510.0",
-    "next": "15.3.1",
+    "next": "^15.3.6",
     "pdfjs-dist": "^4.10.38",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zustand": "^5.0.5"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4",
-    "typescript": "^5",
-    "@firebase/rules-unit-testing": "^4.0.1"
+    "typescript": "^5"
   }
 }
