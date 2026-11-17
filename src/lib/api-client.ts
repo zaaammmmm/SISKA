@@ -8,6 +8,7 @@
 
 import { auth } from '@/lib/firebase/client';
 import { emitNotificationsChanged } from '@/lib/notification-events';
+import { withBasePath } from '@/lib/base-path';
 import type {
   AiChatResponse,
   ApiErrorBody,
@@ -109,18 +110,18 @@ interface RequestOptions {
 
 export function buildApiUrl(path: string, origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'): URL {
   const rawPath = (path ?? '').trim();
-  const normalizedBase = '/api/v1';
+  const normalizedBase = withBasePath('/api/v1');
 
   if (!rawPath || rawPath === '/') {
     return new URL(normalizedBase, origin);
   }
 
   const candidate = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
-  if (candidate === normalizedBase || candidate.startsWith(`${normalizedBase}/`)) {
-    return new URL(candidate, origin);
-  }
+  const apiCandidate = candidate === '/api/v1' || candidate.startsWith('/api/v1/')
+    ? candidate
+    : `${'/api/v1'}${candidate}`;
 
-  return new URL(`${normalizedBase}${candidate}`, origin);
+  return new URL(withBasePath(apiCandidate), origin);
 }
 
 async function apiRequest<TResponse>(
@@ -546,8 +547,8 @@ export interface BackendHealthStatus {
 export async function fetchBackendHealth(): Promise<BackendHealthStatus> {
   const url =
     typeof window !== 'undefined'
-      ? `${window.location.origin}/api/v1/health`
-      : 'http://localhost:3000/api/v1/health';
+      ? new URL(withBasePath('/api/v1/health'), window.location.origin).toString()
+      : new URL(withBasePath('/api/v1/health'), 'http://localhost:3000').toString();
   const response = await fetch(url, { method: 'GET', cache: 'no-store' });
   const json = (await response.json()) as BackendHealthStatus;
   return json;
