@@ -16,6 +16,8 @@ const cspDirectives = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  basePath: '/siska',
+  assetPrefix: '/siska',
   serverExternalPackages: ['pdfjs-dist'],
   async headers() {
     return [
