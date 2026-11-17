@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { withBasePath } from "@/lib/base-path";
 
 /** Emblem SISKA: perisai heksagon + figur orang + dua tangan yang menopang. */
 export function Emblem({ size = 40, tone = "teal" }: { size?: number; tone?: "teal" | "white" }) {
@@ -29,11 +30,12 @@ export function Logo({
 
   const inner = (
     <Image
-      src="/siska.png"
+      src={withBasePath('/siska.png')}
       alt="SISKA"
       width={safeSize}
       height={safeSize}
       priority
+      unoptimized
       style={{
         display: "block",
         width: safeSize,
