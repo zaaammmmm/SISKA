@@ -71,6 +71,7 @@ export interface SerializedUserProfile {
   role: UserRole;
   createdAt: string;
   updatedAt: string;
+  photoUrl?: string | null;
 }
 
 /* ========================================================================== */
@@ -138,6 +139,8 @@ export interface CreateEvidenceResult {
 export interface SignedDownloadUrlResult {
   url: string;
   expiresInSeconds: number;
+  previewUrl?: string | null;
+  blurredPreviewUrl?: string | null;
 }
 
 /* ========================================================================== */
@@ -265,6 +268,7 @@ export interface SerializedEducationItem {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  coverImageUrl?: string | null;
 }
 
 export type PaginatedEducationResult = PaginatedResponse<SerializedEducationItem>;

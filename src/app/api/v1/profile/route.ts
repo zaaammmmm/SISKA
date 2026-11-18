@@ -10,6 +10,7 @@ import {
 } from '@/server/services/profile.service';
 import {
   parseJsonObject,
+  validateMultipartUpdateProfileInput,
   validateUpdateProfileInput,
 } from '@/server/validators';
 
@@ -25,6 +26,19 @@ export const GET = withAuthenticatedRoute(
 // PATCH /api/v1/profile
 export const PATCH = withAuthenticatedRoute(
   async ({ request, requestId, caller }) => {
+    const contentTypeHeader = request.headers.get('content-type') || '';
+
+    if (contentTypeHeader.toLowerCase().includes('multipart/form-data')) {
+      const currentProfile = await getMyProfile(caller);
+      const formData = await request.formData();
+      const input = await validateMultipartUpdateProfileInput(
+        formData,
+        currentProfile.displayName,
+      );
+      const updated = await updateMyProfile(caller, input, requestId);
+      return jsonSuccess(updated, requestId, 200);
+    }
+
     const rawBody = await parseJsonObject(request);
     const input = validateUpdateProfileInput(rawBody);
     const updated = await updateMyProfile(caller, input, requestId);

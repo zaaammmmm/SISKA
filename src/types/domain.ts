@@ -62,6 +62,8 @@ export interface UserDocument {
   role: UserRole;
   createdAt: Date | string;
   updatedAt: Date | string;
+  avatarPath?: string | null;
+  photoUrl?: string | null;
 }
 
 export interface ReportDocument {
@@ -159,6 +161,8 @@ export interface EducationDocument {
   createdBy: string;
   createdAt: Date | string;
   updatedAt: Date | string;
+  coverImageUrl?: string | null;
+  coverStoragePath?: string | null;
 }
 
 export const NOTIFICATION_TYPES = [

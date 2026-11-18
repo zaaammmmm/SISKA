@@ -10,6 +10,14 @@
 
 import { createHash } from 'node:crypto';
 import {
+  buildCloudinarySignedDownloadUrl,
+  buildCloudinarySignedUploadGrant,
+  deleteFromCloudinary,
+  downloadBytesFromCloudinary,
+  resolveActiveStorageProvider,
+  uploadBytesToCloudinary,
+} from '@/lib/cloudinary';
+import {
   getAdminBucket,
   getAdminDb,
   isFirebaseEmulatorMode,
@@ -40,6 +48,7 @@ import type {
 import {
   EVIDENCE_MAX_BYTES,
   EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
+  type EvidenceContentType,
   type EvidenceDocument,
   type ReportDocument,
 } from '@/types/domain';
@@ -57,8 +66,39 @@ export type {
 async function buildShortLivedStorageUrl(
   storagePath: string,
   action: 'read' | 'write',
-  contentType?: string,
+  contentType?: EvidenceContentType,
 ): Promise<SignedDownloadUrlResult> {
+  const provider = resolveActiveStorageProvider();
+
+  if (provider === 'cloudinary') {
+    if (action === 'write') {
+      const grant = buildCloudinarySignedUploadGrant({
+        storagePath,
+        contentType: contentType ?? 'image/jpeg',
+        deliveryType: 'private',
+      });
+      return {
+        url: grant.uploadUrl,
+        expiresInSeconds: grant.expiresInSeconds,
+      };
+    }
+
+    const signed = buildCloudinarySignedDownloadUrl({
+      storagePath,
+      contentType,
+      expiresInSeconds: EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
+      deliveryType: 'private',
+    });
+    return {
+      url: signed.url,
+      expiresInSeconds: signed.expiresInSeconds,
+      ...(signed.previewUrl ? { previewUrl: signed.previewUrl } : {}),
+      ...(signed.blurredPreviewUrl
+        ? { blurredPreviewUrl: signed.blurredPreviewUrl }
+        : {}),
+    };
+  }
+
   const expiresInSeconds = EVIDENCE_SIGNED_URL_EXPIRES_SECONDS;
   const expiresAtMs = Date.now() + expiresInSeconds * 1000;
 
@@ -78,6 +118,7 @@ async function buildShortLivedStorageUrl(
     action,
     expires: expiresAtMs,
     ...(action === 'write' && contentType ? { contentType } : {}),
+    ...(action === 'read' ? { responseDisposition: 'attachment' } : {}),
   });
 
   return { url, expiresInSeconds };
@@ -130,27 +171,46 @@ async function persistVerifiedEvidenceBytes(params: {
     throw ApiError.uploadRejected(msg, 400, { sha256: msg });
   }
 
-  const ext = extensionForEvidenceType(contentType);
-  const storagePath = `reports/${reportId}/evidence/${evidenceId}.${ext}`;
-  const now = new Date();
-
-  const bucket = getAdminBucket();
-  const storageFile = bucket.file(storagePath);
-
-  await storageFile.save(Buffer.from(bytes), {
-    resumable: false,
-    contentType,
-    metadata: {
-      cacheControl: 'private, no-store',
-    },
-  });
-
   const db = getAdminDb();
   const evidenceRef = db
     .collection('reports')
     .doc(reportId)
     .collection('evidence')
     .doc(evidenceId);
+
+  // Tolak ID bukti yang sudah tercatat sebelum menyentuh storage, agar unggahan
+  // ulang tidak menimpa berkas milik metadata yang sudah ada.
+  const existingSnap = await evidenceRef.get();
+  if (existingSnap.exists) {
+    throw ApiError.conflict(
+      'Metadata untuk ID bukti ini sudah tercatat sebelumnya.',
+    );
+  }
+
+  const ext = extensionForEvidenceType(contentType);
+  const storagePath = `reports/${reportId}/evidence/${evidenceId}.${ext}`;
+  const now = new Date();
+  const provider = resolveActiveStorageProvider();
+
+  if (provider === 'cloudinary') {
+    await uploadBytesToCloudinary({
+      storagePath,
+      bytes,
+      contentType,
+      fileName: originalName,
+      deliveryType: 'private',
+    });
+  } else {
+    const bucket = getAdminBucket();
+    const storageFile = bucket.file(storagePath);
+    await storageFile.save(Buffer.from(bytes), {
+      resumable: false,
+      contentType,
+      metadata: {
+        cacheControl: 'private, no-store',
+      },
+    });
+  }
 
   const evidenceDoc: EvidenceDocument = {
     storagePath,
@@ -176,7 +236,19 @@ async function persistVerifiedEvidenceBytes(params: {
     await batch.commit();
   } catch (dbError) {
     // Kompensasi penghapusan file yatim jika penyimpanan metadata ke Firestore gagal (FILE-04 / NFR-REL-01)
-    await storageFile.delete({ ignoreNotFound: true }).catch(() => undefined);
+    if (provider === 'cloudinary') {
+      await deleteFromCloudinary({
+        storagePath,
+        contentType,
+        deliveryType: 'private',
+      }).catch(() => undefined);
+    } else {
+      const bucket = getAdminBucket();
+      await bucket
+        .file(storagePath)
+        .delete({ ignoreNotFound: true })
+        .catch(() => undefined);
+    }
     throw ApiError.internal(
       dbError instanceof Error
         ? dbError.message
@@ -233,6 +305,13 @@ export async function registerEvidenceUpload(
 
   // Mode 1: Payload biner dikirim sebagai base64 di dalam JSON
   if (input.contentBase64) {
+    // Tolak payload base64 berlebih sebelum didekode agar tidak memboroskan memori.
+    const maxBase64Chars = Math.ceil((EVIDENCE_MAX_BYTES * 4) / 3) + 1024;
+    if (input.contentBase64.length > maxBase64Chars) {
+      const msg = `Ukuran berkas melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
+      throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
+    }
+
     const rawBuffer = Buffer.from(input.contentBase64, 'base64');
     if (rawBuffer.byteLength !== input.sizeBytes) {
       const msg =
@@ -265,27 +344,53 @@ export async function registerEvidenceUpload(
 
     const ext = extensionForEvidenceType(input.contentType);
     const storagePath = `reports/${reportId}/evidence/${input.evidenceId}.${ext}`;
-    const bucket = getAdminBucket();
-    const storageFile = bucket.file(storagePath);
+    const provider = resolveActiveStorageProvider();
 
-    const [exists] = await storageFile.exists();
-    if (!exists) {
-      const msg =
-        'Berkas bukti belum ditemukan di Cloud Storage. Unggah berkas ke uploadUrl terlebih dahulu sebelum finalisasi.';
-      throw ApiError.validation(msg, { evidenceId: msg });
+    let bytes: Uint8Array;
+
+    if (provider === 'cloudinary') {
+      let downloaded: Uint8Array | null;
+      try {
+        downloaded = await downloadBytesFromCloudinary({
+          storagePath,
+          contentType: input.contentType,
+          deliveryType: 'private',
+        });
+      } catch {
+        throw ApiError.uploadRejected(
+          'Gagal memverifikasi isi berkas di layanan penyimpanan media.',
+          400,
+        );
+      }
+
+      if (!downloaded) {
+        const msg =
+          'Berkas bukti belum ditemukan di penyimpanan media. Unggah berkas ke uploadUrl terlebih dahulu sebelum finalisasi.';
+        throw ApiError.validation(msg, { evidenceId: msg });
+      }
+      bytes = downloaded;
+    } else {
+      const bucket = getAdminBucket();
+      const storageFile = bucket.file(storagePath);
+
+      const [exists] = await storageFile.exists();
+      if (!exists) {
+        const msg =
+          'Berkas bukti belum ditemukan di Cloud Storage. Unggah berkas ke uploadUrl terlebih dahulu sebelum finalisasi.';
+        throw ApiError.validation(msg, { evidenceId: msg });
+      }
+
+      let downloadedBuffer: Buffer;
+      try {
+        [downloadedBuffer] = await storageFile.download();
+      } catch {
+        throw ApiError.uploadRejected(
+          'Gagal memverifikasi isi berkas di Cloud Storage.',
+          400,
+        );
+      }
+      bytes = new Uint8Array(downloadedBuffer);
     }
-
-    let downloadedBuffer: Buffer;
-    try {
-      [downloadedBuffer] = await storageFile.download();
-    } catch {
-      throw ApiError.uploadRejected(
-        'Gagal memverifikasi isi berkas di Cloud Storage.',
-        400,
-      );
-    }
-
-    const bytes = new Uint8Array(downloadedBuffer);
 
     try {
       if (bytes.byteLength < 1 || bytes.byteLength > EVIDENCE_MAX_BYTES) {
@@ -347,7 +452,18 @@ export async function registerEvidenceUpload(
       };
     } catch (verifyOrDbError) {
       // Hapus objek dari Storage bila gagal validasi signature/ukuran atau gagal commit ke Firestore (FILE-02 & FILE-04)
-      await storageFile.delete({ ignoreNotFound: true }).catch(() => undefined);
+      if (provider === 'cloudinary') {
+        await deleteFromCloudinary({
+          storagePath,
+          contentType: input.contentType,
+          deliveryType: 'private',
+        }).catch(() => undefined);
+      } else {
+        await getAdminBucket()
+          .file(storagePath)
+          .delete({ ignoreNotFound: true })
+          .catch(() => undefined);
+      }
       if (verifyOrDbError instanceof ApiError) {
         throw verifyOrDbError;
       }
@@ -412,6 +528,18 @@ export async function uploadEvidenceBinary(
   }
 
   const file = fileEntry as File;
+
+  // Periksa ukuran dari metadata File sebelum membaca isi ke memori.
+  if (file.size < 1) {
+    throw ApiError.uploadRejected('Berkas bukti tidak boleh kosong.', 400, {
+      file: 'Berkas bukti tidak boleh kosong.',
+    });
+  }
+  if (file.size > EVIDENCE_MAX_BYTES) {
+    const msg = `Ukuran berkas melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
+    throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
+  }
+
   const bytes = new Uint8Array(await file.arrayBuffer());
   const computedSha256 = createHash('sha256').update(bytes).digest('hex');
 
@@ -474,6 +602,7 @@ export async function authorizeEvidenceDownload(
   const signed = await buildShortLivedStorageUrl(
     evidenceData.storagePath,
     'read',
+    evidenceData.contentType,
   );
 
   await recordAuditEvent({
@@ -487,5 +616,9 @@ export async function authorizeEvidenceDownload(
   return {
     url: signed.url,
     expiresInSeconds: signed.expiresInSeconds,
+    ...(signed.previewUrl ? { previewUrl: signed.previewUrl } : {}),
+    ...(signed.blurredPreviewUrl
+      ? { blurredPreviewUrl: signed.blurredPreviewUrl }
+      : {}),
   };
 }

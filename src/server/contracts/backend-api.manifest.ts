@@ -184,9 +184,18 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
     method: 'POST',
     path: '/api/v1/conversations/{id}/messages',
     allowedRoles: ['reporter', 'admin'],
-    ownershipRule: '`senderUid` & `senderRole` diambil dari token server (CHAT-01)',
+    ownershipRule: '`senderUid` & `senderRole` diambil dari token server (CHAT-01); mendukung lampiran foto/PDF privat',
     rateLimitPolicy: 'SEND_MESSAGE',
-    description: 'Mengirim pesan baru pada percakapan yang masih berstatus `open`.',
+    description: 'Mengirim pesan baru (beserta lampiran foto/PDF opsional) pada percakapan yang masih berstatus `open`.',
+  },
+  {
+    id: 'messages.attachmentDownload',
+    method: 'GET',
+    path: '/api/v1/conversations/{id}/messages/{messageId}/attachment',
+    allowedRoles: ['reporter', 'admin'],
+    ownershipRule: 'Hanya peserta percakapan sah; menerbitkan Signed URL pendek (<= 300 detik) & pratinjau EXIF-stripped',
+    rateLimitPolicy: null,
+    description: 'Mengotorisasi pengunduhan/pratinjau lampiran foto atau berkas pada pesan percakapan.',
   },
 
   // 6. SISKA AI General Assistant

@@ -7,11 +7,23 @@ import {
   type PaginationParams,
 } from '@/server/validators/common';
 import {
+  assertValidFileSignature,
+  validateCreateEvidenceInput,
+} from '@/server/validators/evidence.validator';
+import {
   EDUCATION_CATEGORIES,
   EDUCATION_ICONS,
+  EVIDENCE_MAX_BYTES,
   type EducationCategory,
   type EducationIcon,
 } from '@/types/domain';
+
+export interface EducationCoverUploadInput {
+  fileName: string;
+  contentType: 'image/jpeg' | 'image/png';
+  sizeBytes: number;
+  bytes: Uint8Array;
+}
 
 export interface CreateEducationInput {
   title: string;
@@ -24,6 +36,7 @@ export interface CreateEducationInput {
   readingTimeMinutes?: number;
   isPublished?: boolean;
   sortOrder?: number;
+  coverImage?: EducationCoverUploadInput | null;
 }
 
 export interface UpdateEducationInput {
@@ -37,6 +50,7 @@ export interface UpdateEducationInput {
   readingTimeMinutes?: number;
   isPublished?: boolean;
   sortOrder?: number;
+  coverImage?: EducationCoverUploadInput | null;
 }
 
 export interface ListEducationQuery extends PaginationParams {
@@ -57,9 +71,56 @@ const CREATE_EDUCATION_ALLOWED_KEYS = [
   'readingTimeMinutes',
   'isPublished',
   'sortOrder',
+  'coverImage',
 ] as const;
 
 const UPDATE_EDUCATION_ALLOWED_KEYS = CREATE_EDUCATION_ALLOWED_KEYS;
+
+function parseCoverImageObject(
+  rawCover: unknown,
+): EducationCoverUploadInput | null {
+  if (rawCover === undefined || rawCover === null) {
+    return null;
+  }
+  if (typeof rawCover !== 'object' || Array.isArray(rawCover)) {
+    const msg = "Field 'coverImage' harus berupa objek berkas gambar sampul.";
+    throw ApiError.validation(msg, { coverImage: msg });
+  }
+
+  const meta = validateCreateEvidenceInput(rawCover as Record<string, unknown>);
+  if (meta.contentType !== 'image/jpeg' && meta.contentType !== 'image/png') {
+    const msg = 'Gambar sampul edukasi hanya mendukung format JPEG atau PNG.';
+    throw ApiError.uploadRejected(msg, 400, { contentType: msg });
+  }
+
+  if (!meta.contentBase64) {
+    const msg = "Field 'coverImage.contentBase64' wajib disertakan.";
+    throw ApiError.validation(msg, { coverImage: msg });
+  }
+
+  const maxBase64Chars = Math.ceil((EVIDENCE_MAX_BYTES * 4) / 3) + 1024;
+  if (meta.contentBase64.length > maxBase64Chars) {
+    const msg = `Ukuran gambar sampul melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
+    throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
+  }
+
+  const decoded = Buffer.from(meta.contentBase64, 'base64');
+  if (decoded.byteLength !== meta.sizeBytes) {
+    const msg =
+      "Ukuran hasil dekode 'contentBase64' tidak sesuai dengan 'sizeBytes'.";
+    throw ApiError.validation(msg, { sizeBytes: msg });
+  }
+
+  const bytes = new Uint8Array(decoded);
+  assertValidFileSignature(bytes, meta.contentType);
+
+  return {
+    fileName: meta.fileName,
+    contentType: meta.contentType,
+    sizeBytes: bytes.byteLength,
+    bytes,
+  };
+}
 
 // Helper Validasi Kategori
 function validateCategory(value: unknown): EducationCategory {
@@ -174,6 +235,7 @@ export function validateCreateEducationInput(
   const readingTimeMinutes = validateReadingTime(payload.readingTimeMinutes);
   const isPublished = validatePublished(payload.isPublished);
   const sortOrder = validateSortOrder(payload.sortOrder);
+  const coverImage = parseCoverImageObject(payload.coverImage);
 
   return {
     title,
@@ -186,6 +248,7 @@ export function validateCreateEducationInput(
     readingTimeMinutes,
     isPublished,
     sortOrder,
+    ...(coverImage ? { coverImage } : {}),
   };
 }
 
@@ -242,6 +305,9 @@ export function validateUpdateEducationInput(
   }
   if ('sortOrder' in payload) {
     result.sortOrder = validateSortOrder(payload.sortOrder);
+  }
+  if ('coverImage' in payload) {
+    result.coverImage = parseCoverImageObject(payload.coverImage);
   }
 
   return result;

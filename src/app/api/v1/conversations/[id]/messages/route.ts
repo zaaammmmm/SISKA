@@ -7,6 +7,7 @@ import {
 import { listMessages, sendMessage } from '@/server/services/conversation.service';
 import {
   parseJsonObject,
+  validateMultipartSendMessageInput,
   validatePaginationParams,
   validateResourceId,
   validateSendMessageInput,
@@ -32,6 +33,15 @@ export const POST = withAuthenticatedRoute<ConversationMessagesRouteParams>(
   async ({ request, requestId, caller, params }) => {
     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.SEND_MESSAGE);
     const conversationId = validateResourceId(params.id, 'conversationId');
+    const contentTypeHeader = request.headers.get('content-type') || '';
+
+    if (contentTypeHeader.toLowerCase().includes('multipart/form-data')) {
+      const formData = await request.formData();
+      const input = await validateMultipartSendMessageInput(formData);
+      const created = await sendMessage(caller, conversationId, input);
+      return jsonSuccess(created, requestId, 201);
+    }
+
     const rawBody = await parseJsonObject(request);
     const input = validateSendMessageInput(rawBody);
     const created = await sendMessage(caller, conversationId, input);

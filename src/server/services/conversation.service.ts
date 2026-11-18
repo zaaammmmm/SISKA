@@ -9,9 +9,21 @@
  */
 
 import type { DocumentData } from 'firebase-admin/firestore';
-import { getAdminDb } from '@/lib/firebase/admin';
+import {
+  buildCloudinarySignedDownloadUrl,
+  deleteFromCloudinary,
+  resolveActiveStorageProvider,
+  uploadBytesToCloudinary,
+} from '@/lib/cloudinary';
+import {
+  getAdminBucket,
+  getAdminDb,
+  isFirebaseEmulatorMode,
+  resolveAdminConfig,
+} from '@/lib/firebase/admin';
 import { toIsoDateString, toIsoStringOrNull } from '@/lib/firebase/firestore';
 import {
+  INDISTINGUISHABLE_NOT_FOUND_MESSAGE,
   assertCanAccessConversation,
   assertCanReadReport,
   requireAdmin,
@@ -21,24 +33,30 @@ import {
 } from '@/server/authz/permissions';
 import type { AuthenticatedCaller } from '@/server/authz/verify-token';
 import { ApiError } from '@/server/errors/api-error';
-import { recordAuditEventInTransaction } from '@/server/services/audit.service';
+import {
+  recordAuditEvent,
+  recordAuditEventInTransaction,
+} from '@/server/services/audit.service';
 import type { PaginationParams } from '@/server/validators/common';
 import type {
   CreateConversationInput,
   SendMessageInput,
   UpdateConversationAdminInput,
 } from '@/server/validators/conversation.validator';
+import { extensionForEvidenceType } from '@/server/validators/evidence.validator';
 import type {
   PaginatedConversationsResult,
   PaginatedMessagesResult,
   SerializedConversation,
   SerializedMessage,
+  SignedDownloadUrlResult,
 } from '@/types/api';
-import type {
-  ConversationDocument,
-  ConversationStatus,
-  MessageDocument,
-  ReportDocument,
+import {
+  EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
+  type ConversationDocument,
+  type ConversationStatus,
+  type MessageDocument,
+  type ReportDocument,
 } from '@/types/domain';
 
 export type {
@@ -347,88 +365,248 @@ export async function sendMessage(
   const authorized = requireRole(caller, ['reporter', 'admin']);
   const db = getAdminDb();
   const convRef = db.collection('conversations').doc(conversationId);
+  const preGeneratedMsgRef = convRef.collection('messages').doc();
+  const provider = resolveActiveStorageProvider();
 
-  const createdMessage = await db.runTransaction(async (tx) => {
-    const convSnap = await tx.get(convRef);
-    const convData = convSnap.exists
-      ? (convSnap.data() as ConversationDocument)
+  let uploadedAttachmentPath: string | null = null;
+  let uploadedContentType: string | undefined;
+
+  // Lampiran diunggah SEBELUM transaksi Firestore. Otorisasi (termasuk klaim admin
+  // pada percakapan yang belum ditugaskan) diperiksa lebih dulu agar pengguna tak
+  // berwenang tidak pernah dapat menulis berkas ke storage.
+  if (input.attachment) {
+    const preSnap = await convRef.get();
+    const preData = preSnap.exists
+      ? (preSnap.data() as ConversationDocument)
       : null;
-
-    const assignedAdminId = convData ? resolveConversationAdminId(convData) : null;
-    const unassignedAdminUsers = authorized.role === 'reporter' && !assignedAdminId
-      ? await tx.get(db.collection('users').where('role', '==', 'admin'))
+    const preAssignedAdmin = preData
+      ? resolveConversationAdminId(preData)
       : null;
+    const effectivePreData: ConversationDocument | null =
+      preData && authorized.role === 'admin' && !preAssignedAdmin
+        ? { ...preData, assignedAdminId: authorized.uid }
+        : preData;
 
-    // Jika admin membalas percakapan yang belum ditugaskan (`assignedAdminId === null`),
-    // klaim penugasan untuk admin tersebut; jika sudah ditugaskan ke admin lain atau tidak ada, assertCanAccessConversation akan menolak secara seragam (404).
-    const effectiveConvData: ConversationDocument | null =
-      convData && authorized.role === 'admin' && !assignedAdminId
-        ? { ...convData, assignedAdminId: authorized.uid }
-        : convData;
+    assertCanAccessConversation(authorized, effectivePreData, 'send');
 
-    assertCanAccessConversation(authorized, effectiveConvData, 'send');
-
-    if (convData!.status === 'closed') {
+    if (preData!.status === 'closed') {
       throw ApiError.conflict(
         'Percakapan ini telah ditutup dan tidak dapat menerima pesan baru.',
       );
     }
 
-    const now = new Date();
-    const msgRef = convRef.collection('messages').doc();
-    const msgData: MessageDocument = {
-      senderUid: authorized.uid,
-      body: input.body,
-      createdAt: now,
-      attachmentPath: null,
-    };
+    const ext = extensionForEvidenceType(input.attachment.contentType);
+    uploadedAttachmentPath = `conversations/${conversationId}/attachments/${preGeneratedMsgRef.id}.${ext}`;
+    uploadedContentType = input.attachment.contentType;
 
-    tx.create(msgRef, msgData);
-    tx.update(convRef, {
-      updatedAt: now,
-      // Metadata ringkas ini membuat preview daftar chat ikut realtime
-      // melalui listener dokumen conversations tanpa listener tambahan per pesan.
-      lastMessage: input.body.slice(0, 180),
-      lastMessageSenderUid: authorized.uid,
-      lastMessageAt: now,
-      ...(authorized.role === 'admin' && !assignedAdminId
-        ? { assignedAdminId: authorized.uid }
-        : {}),
-    });
-
-    // Otomatis kirim In-App Notification kepada lawan bicara di percakapan
-    const reporterId = resolveConversationReporterId(convData!);
-    const recipientUid =
-      authorized.role === 'reporter' ? assignedAdminId : reporterId;
-
-    const notificationRecipients = recipientUid
-      ? [recipientUid]
-      : (unassignedAdminUsers?.docs ?? []).map((adminUser) => adminUser.id);
-    for (const targetUid of notificationRecipients) {
-      // ID deterministik: satu notifikasi per percakapan per penerima. Pesan berikutnya
-      // memperbarui notifikasi yang sama (kembali "belum dibaca" + naik ke atas daftar)
-      // sehingga lonceng tidak dibanjiri satu item per pesan.
-      const notifRef = db.collection('users').doc(targetUid)
-        .collection('notifications').doc(`chat_${conversationId}`);
-      tx.set(notifRef, {
-        recipientUid: targetUid,
-        type: 'new_chat_message',
-        title: 'Pesan Baru Diterima',
-        body: 'Anda menerima pesan baru pada ruang percakapan SISKA.',
-        targetType: 'conversation',
-        targetId: conversationId,
-        // Dipakai badge untuk menghitung jumlah pengguna, bukan jumlah pesan.
-        senderUid: authorized.uid,
-        isRead: false,
-        readAt: null,
-        createdAt: now,
+    if (provider === 'cloudinary') {
+      await uploadBytesToCloudinary({
+        storagePath: uploadedAttachmentPath,
+        bytes: input.attachment.bytes,
+        contentType: input.attachment.contentType,
+        fileName: input.attachment.fileName,
+        deliveryType: 'private',
+      });
+    } else {
+      const bucket = getAdminBucket();
+      await bucket.file(uploadedAttachmentPath).save(Buffer.from(input.attachment.bytes), {
+        resumable: false,
+        contentType: input.attachment.contentType,
+        metadata: {
+          cacheControl: 'private, no-store',
+        },
       });
     }
+  }
 
-    return serializeMessageDoc(msgRef.id, msgData);
-  });
+  let createdMessage: SerializedMessage;
+  try {
+    createdMessage = await db.runTransaction(async (tx) => {
+      const convSnap = await tx.get(convRef);
+      const convData = convSnap.exists
+        ? (convSnap.data() as ConversationDocument)
+        : null;
+
+      const assignedAdminId = convData ? resolveConversationAdminId(convData) : null;
+      const unassignedAdminUsers = authorized.role === 'reporter' && !assignedAdminId
+        ? await tx.get(db.collection('users').where('role', '==', 'admin'))
+        : null;
+
+      // Jika admin membalas percakapan yang belum ditugaskan (`assignedAdminId === null`),
+      // klaim penugasan untuk admin tersebut; jika sudah ditugaskan ke admin lain atau tidak ada, assertCanAccessConversation akan menolak secara seragam (404).
+      const effectiveConvData: ConversationDocument | null =
+        convData && authorized.role === 'admin' && !assignedAdminId
+          ? { ...convData, assignedAdminId: authorized.uid }
+          : convData;
+
+      assertCanAccessConversation(authorized, effectiveConvData, 'send');
+
+      if (convData!.status === 'closed') {
+        throw ApiError.conflict(
+          'Percakapan ini telah ditutup dan tidak dapat menerima pesan baru.',
+        );
+      }
+
+      const now = new Date();
+      const msgRef = preGeneratedMsgRef;
+      const msgData: MessageDocument = {
+        senderUid: authorized.uid,
+        body: input.body,
+        createdAt: now,
+        attachmentPath: uploadedAttachmentPath,
+      };
+
+      tx.create(msgRef, msgData);
+      tx.update(convRef, {
+        updatedAt: now,
+        // Metadata ringkas ini membuat preview daftar chat ikut realtime
+        // melalui listener dokumen conversations tanpa listener tambahan per pesan.
+        lastMessage: input.body.slice(0, 180),
+        lastMessageSenderUid: authorized.uid,
+        lastMessageAt: now,
+        ...(authorized.role === 'admin' && !assignedAdminId
+          ? { assignedAdminId: authorized.uid }
+          : {}),
+      });
+
+      // Otomatis kirim In-App Notification kepada lawan bicara di percakapan
+      const reporterId = resolveConversationReporterId(convData!);
+      const recipientUid =
+        authorized.role === 'reporter' ? assignedAdminId : reporterId;
+
+      const notificationRecipients = recipientUid
+        ? [recipientUid]
+        : (unassignedAdminUsers?.docs ?? []).map((adminUser) => adminUser.id);
+      for (const targetUid of notificationRecipients) {
+        // ID deterministik: satu notifikasi per percakapan per penerima. Pesan berikutnya
+        // memperbarui notifikasi yang sama (kembali "belum dibaca" + naik ke atas daftar)
+        // sehingga lonceng tidak dibanjiri satu item per pesan.
+        const notifRef = db.collection('users').doc(targetUid)
+          .collection('notifications').doc(`chat_${conversationId}`);
+        tx.set(notifRef, {
+          recipientUid: targetUid,
+          type: 'new_chat_message',
+          title: 'Pesan Baru Diterima',
+          body: 'Anda menerima pesan baru pada ruang percakapan SISKA.',
+          targetType: 'conversation',
+          targetId: conversationId,
+          // Dipakai badge untuk menghitung jumlah pengguna, bukan jumlah pesan.
+          senderUid: authorized.uid,
+          isRead: false,
+          readAt: null,
+          createdAt: now,
+        });
+      }
+
+      return serializeMessageDoc(msgRef.id, msgData);
+    });
+  } catch (txError) {
+    // Kompensasi: hapus lampiran yatim bila transaksi Firestore gagal.
+    if (uploadedAttachmentPath) {
+      if (provider === 'cloudinary') {
+        await deleteFromCloudinary({
+          storagePath: uploadedAttachmentPath,
+          contentType: uploadedContentType,
+          deliveryType: 'private',
+        }).catch(() => undefined);
+      } else {
+        await getAdminBucket()
+          .file(uploadedAttachmentPath)
+          .delete({ ignoreNotFound: true })
+          .catch(() => undefined);
+      }
+    }
+    throw txError;
+  }
 
   return createdMessage;
+}
+
+/**
+ * Mengotorisasi pengunduhan/pratinjau lampiran pesan dan menerbitkan Signed URL singkat
+ * (`GET /api/v1/conversations/{conversationId}/messages/{messageId}/attachment`).
+ * Hanya peserta sah percakapan; selain itu 404 seragam (anti-IDOR).
+ */
+export async function authorizeMessageAttachmentDownload(
+  caller: AuthenticatedCaller,
+  conversationId: string,
+  messageId: string,
+  requestId: string,
+): Promise<SignedDownloadUrlResult> {
+  const db = getAdminDb();
+  const convRef = db.collection('conversations').doc(conversationId);
+  const convSnap = await convRef.get();
+  const convData = convSnap.exists
+    ? (convSnap.data() as ConversationDocument)
+    : null;
+
+  const authorized = assertCanAccessConversation(caller, convData, 'read');
+
+  const msgSnap = await convRef.collection('messages').doc(messageId).get();
+  if (!msgSnap.exists) {
+    throw ApiError.notFound(INDISTINGUISHABLE_NOT_FOUND_MESSAGE);
+  }
+
+  const msgData = msgSnap.data() as MessageDocument;
+  if (!msgData.attachmentPath) {
+    throw ApiError.notFound(INDISTINGUISHABLE_NOT_FOUND_MESSAGE);
+  }
+
+  const storagePath = msgData.attachmentPath;
+  const inferredMime = storagePath.endsWith('.pdf')
+    ? 'application/pdf'
+    : storagePath.endsWith('.png')
+      ? 'image/png'
+      : 'image/jpeg';
+
+  let signedResult: SignedDownloadUrlResult;
+  if (resolveActiveStorageProvider() === 'cloudinary') {
+    const cldSigned = buildCloudinarySignedDownloadUrl({
+      storagePath,
+      contentType: inferredMime,
+      expiresInSeconds: EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
+      deliveryType: 'private',
+    });
+    signedResult = {
+      url: cldSigned.url,
+      expiresInSeconds: cldSigned.expiresInSeconds,
+      ...(cldSigned.previewUrl ? { previewUrl: cldSigned.previewUrl } : {}),
+      ...(cldSigned.blurredPreviewUrl
+        ? { blurredPreviewUrl: cldSigned.blurredPreviewUrl }
+        : {}),
+    };
+  } else if (isFirebaseEmulatorMode()) {
+    const cfg = resolveAdminConfig();
+    const host = cfg.storageHost || '127.0.0.1:9199';
+    const encodedPath = encodeURIComponent(storagePath);
+    signedResult = {
+      url: `http://${host}/v0/b/${cfg.storageBucket}/o/${encodedPath}?alt=media`,
+      expiresInSeconds: EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
+    };
+  } else {
+    const [url] = await getAdminBucket()
+      .file(storagePath)
+      .getSignedUrl({
+        version: 'v4',
+        action: 'read',
+        expires: Date.now() + EVIDENCE_SIGNED_URL_EXPIRES_SECONDS * 1000,
+        responseDisposition: 'attachment',
+      });
+    signedResult = {
+      url,
+      expiresInSeconds: EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
+    };
+  }
+
+  await recordAuditEvent({
+    actorUid: authorized.uid,
+    action: 'evidence.downloaded',
+    targetType: 'conversation',
+    targetId: conversationId,
+    requestId,
+  });
+
+  return signedResult;
 }
 
 /**

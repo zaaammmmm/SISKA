@@ -9,7 +9,19 @@
  */
 
 import type { DocumentData } from 'firebase-admin/firestore';
-import { getAdminAuth, getAdminDb } from '@/lib/firebase/admin';
+import {
+  buildCloudinaryPublicImageUrl,
+  deleteFromCloudinary,
+  resolveActiveStorageProvider,
+  uploadBytesToCloudinary,
+} from '@/lib/cloudinary';
+import {
+  getAdminAuth,
+  getAdminBucket,
+  getAdminDb,
+  isFirebaseEmulatorMode,
+  resolveAdminConfig,
+} from '@/lib/firebase/admin';
 import { toIsoDateString } from '@/lib/firebase/firestore';
 import {
   INDISTINGUISHABLE_NOT_FOUND_MESSAGE,
@@ -21,16 +33,39 @@ import {
   recordAuditEventInBatch,
   recordAuditEventInTransaction,
 } from '@/server/services/audit.service';
+import { extensionForEvidenceType } from '@/server/validators/evidence.validator';
 import type { UpdateProfileInput } from '@/server/validators/profile.validator';
 import type { SerializedUserProfile } from '@/types/api';
 import type { UserDocument, UserRole } from '@/types/domain';
 
 export type { SerializedUserProfile };
 
+// Resolusi URL Foto Profil
+function resolveAvatarUrl(data: DocumentData): string | null | undefined {
+  if (typeof data.photoUrl === 'string' && data.photoUrl.trim().length > 0) {
+    return data.photoUrl;
+  }
+  if (typeof data.avatarPath === 'string' && data.avatarPath.trim().length > 0) {
+    if (resolveActiveStorageProvider() === 'cloudinary') {
+      return buildCloudinaryPublicImageUrl({
+        storagePath: data.avatarPath,
+        preset: 'avatar',
+      });
+    }
+    if (isFirebaseEmulatorMode()) {
+      const cfg = resolveAdminConfig();
+      const host = cfg.storageHost || '127.0.0.1:9199';
+      return `http://${host}/v0/b/${cfg.storageBucket}/o/${encodeURIComponent(data.avatarPath)}?alt=media`;
+    }
+  }
+  return undefined;
+}
+
 function serializeUserDoc(
   uid: string,
   data: DocumentData,
 ): SerializedUserProfile {
+  const resolvedPhotoUrl = resolveAvatarUrl(data);
   return {
     uid: String(data.uid ?? uid),
     displayName: String(data.displayName ?? ''),
@@ -38,6 +73,7 @@ function serializeUserDoc(
     role: (data.role as UserRole) ?? 'reporter',
     createdAt: toIsoDateString(data.createdAt),
     updatedAt: toIsoDateString(data.updatedAt),
+    ...(resolvedPhotoUrl !== undefined ? { photoUrl: resolvedPhotoUrl } : {}),
   };
 }
 
@@ -67,7 +103,8 @@ export async function getMyProfile(
  * - Wajib lolos `requireAuthorizedUser(caller)` (tanpa hardcoded UID akun uji apa pun).
  * - Akun yang tidak memiliki Custom Claim role maupun dokumen profil `users/{uid}`
  *   otomatis ditolak dengan `403 FORBIDDEN`.
- * - Hanya `displayName` dan `updatedAt` yang dapat diperbarui; `role`, `uid`, `email`, dan `createdAt` dikunci.
+ * - Hanya `displayName`, foto profil (`avatarPath`/`photoUrl`), dan `updatedAt` yang dapat diperbarui;
+ *   `role`, `uid`, `email`, dan `createdAt` dikunci.
  */
 export async function updateMyProfile(
   caller: AuthenticatedCaller,
@@ -78,35 +115,98 @@ export async function updateMyProfile(
   const db = getAdminDb();
   const userRef = db.collection('users').doc(authorized.uid);
 
-  return db.runTransaction(async (tx) => {
-    const snap = await tx.get(userRef);
-    if (!snap.exists) {
-      throw ApiError.notFound(INDISTINGUISHABLE_NOT_FOUND_MESSAGE);
+  const provider = resolveActiveStorageProvider();
+  let uploadedAvatarPath: string | null = null;
+  let uploadedPhotoUrl: string | null = null;
+
+  if (input.avatar) {
+    const ext = extensionForEvidenceType(input.avatar.contentType);
+    uploadedAvatarPath = `users/${authorized.uid}/avatar_${Date.now()}.${ext}`;
+
+    if (provider === 'cloudinary') {
+      await uploadBytesToCloudinary({
+        storagePath: uploadedAvatarPath,
+        bytes: input.avatar.bytes,
+        contentType: input.avatar.contentType,
+        fileName: input.avatar.fileName,
+        deliveryType: 'upload',
+      });
+      uploadedPhotoUrl = buildCloudinaryPublicImageUrl({
+        storagePath: uploadedAvatarPath,
+        preset: 'avatar',
+      });
+    } else {
+      const bucket = getAdminBucket();
+      await bucket.file(uploadedAvatarPath).save(Buffer.from(input.avatar.bytes), {
+        resumable: false,
+        contentType: input.avatar.contentType,
+        metadata: {
+          cacheControl: 'private, max-age=3600',
+        },
+      });
+      if (isFirebaseEmulatorMode()) {
+        const cfg = resolveAdminConfig();
+        const host = cfg.storageHost || '127.0.0.1:9199';
+        uploadedPhotoUrl = `http://${host}/v0/b/${cfg.storageBucket}/o/${encodeURIComponent(uploadedAvatarPath)}?alt=media`;
+      }
     }
+  }
 
-    const existingData = snap.data() as UserDocument;
-    const now = new Date();
+  try {
+    return await db.runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
+      if (!snap.exists) {
+        throw ApiError.notFound(INDISTINGUISHABLE_NOT_FOUND_MESSAGE);
+      }
 
-    tx.update(userRef, {
-      displayName: input.displayName,
-      updatedAt: now,
+      const existingData = snap.data() as UserDocument;
+      const now = new Date();
+
+      const updateFields: Record<string, unknown> = {
+        displayName: input.displayName,
+        updatedAt: now,
+        ...(uploadedAvatarPath
+          ? {
+              avatarPath: uploadedAvatarPath,
+              ...(uploadedPhotoUrl ? { photoUrl: uploadedPhotoUrl } : {}),
+            }
+          : {}),
+      };
+
+      tx.update(userRef, updateFields);
+
+      recordAuditEventInTransaction(tx, {
+        actorUid: authorized.uid,
+        action: 'user.profile_updated',
+        targetType: 'user',
+        targetId: authorized.uid,
+        requestId,
+        occurredAt: now,
+      });
+
+      return serializeUserDoc(authorized.uid, {
+        ...existingData,
+        ...updateFields,
+      });
     });
-
-    recordAuditEventInTransaction(tx, {
-      actorUid: authorized.uid,
-      action: 'user.profile_updated',
-      targetType: 'user',
-      targetId: authorized.uid,
-      requestId,
-      occurredAt: now,
-    });
-
-    return serializeUserDoc(authorized.uid, {
-      ...existingData,
-      displayName: input.displayName,
-      updatedAt: now,
-    });
-  });
+  } catch (txError) {
+    // Kompensasi: hapus foto yatim bila transaksi Firestore gagal.
+    if (uploadedAvatarPath && input.avatar) {
+      if (provider === 'cloudinary') {
+        await deleteFromCloudinary({
+          storagePath: uploadedAvatarPath,
+          contentType: input.avatar.contentType,
+          deliveryType: 'upload',
+        }).catch(() => undefined);
+      } else {
+        await getAdminBucket()
+          .file(uploadedAvatarPath)
+          .delete({ ignoreNotFound: true })
+          .catch(() => undefined);
+      }
+    }
+    throw txError;
+  }
 }
 
 /**

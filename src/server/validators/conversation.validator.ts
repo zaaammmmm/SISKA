@@ -5,17 +5,35 @@ import {
   validateRequiredString,
   validateResourceId,
 } from '@/server/validators/common';
+import {
+  assertValidFileSignature,
+  isEvidenceContentType,
+  validateCreateEvidenceInput,
+} from '@/server/validators/evidence.validator';
+import {
+  EVIDENCE_MAX_BYTES,
+  type EvidenceContentType,
+} from '@/types/domain';
 
 export interface CreateConversationInput {
   reportId: string | null;
 }
 
+export interface SendMessageAttachmentInput {
+  fileName: string;
+  contentType: EvidenceContentType;
+  sizeBytes: number;
+  bytes: Uint8Array;
+}
+
 export interface SendMessageInput {
   body: string;
+  attachment?: SendMessageAttachmentInput | null;
 }
 
 const CREATE_CONVERSATION_ALLOWED_KEYS = ['reportId'] as const;
 
+// Validasi Pembuatan Percakapan
 // Validasi Input Pembuatan Percakapan
 export function validateCreateConversationInput(
   payload: Record<string, unknown>,
@@ -39,8 +57,9 @@ export function validateCreateConversationInput(
   };
 }
 
-const SEND_MESSAGE_ALLOWED_KEYS = ['body'] as const;
+const SEND_MESSAGE_ALLOWED_KEYS = ['body', 'attachment'] as const;
 
+// Validasi Pesan JSON
 // Validasi Input Pengiriman Pesan
 export function validateSendMessageInput(
   payload: Record<string, unknown>,
@@ -52,7 +71,107 @@ export function validateSendMessageInput(
     maxLength: 10000,
   });
 
-  return { body };
+  if (payload.attachment === undefined || payload.attachment === null) {
+    return { body };
+  }
+
+  if (typeof payload.attachment !== 'object' || Array.isArray(payload.attachment)) {
+    const msg = "Field 'attachment' harus berupa objek lampiran yang valid.";
+    throw ApiError.validation(msg, { attachment: msg });
+  }
+
+  const rawAtt = payload.attachment as Record<string, unknown>;
+  const validatedMeta = validateCreateEvidenceInput(rawAtt);
+
+  if (!validatedMeta.contentBase64) {
+    const msg = "Field 'attachment.contentBase64' wajib disertakan pada pengiriman lampiran via JSON.";
+    throw ApiError.validation(msg, { attachment: msg });
+  }
+
+  const maxBase64Chars = Math.ceil((EVIDENCE_MAX_BYTES * 4) / 3) + 1024;
+  if (validatedMeta.contentBase64.length > maxBase64Chars) {
+    const msg = `Ukuran lampiran melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
+    throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
+  }
+
+  const decoded = Buffer.from(validatedMeta.contentBase64, 'base64');
+  if (decoded.byteLength !== validatedMeta.sizeBytes) {
+    const msg = "Ukuran hasil dekode 'contentBase64' tidak sesuai dengan 'sizeBytes'.";
+    throw ApiError.validation(msg, { sizeBytes: msg });
+  }
+
+  const bytes = new Uint8Array(decoded);
+  assertValidFileSignature(bytes, validatedMeta.contentType);
+
+  return {
+    body,
+    attachment: {
+      fileName: validatedMeta.fileName,
+      contentType: validatedMeta.contentType,
+      sizeBytes: bytes.byteLength,
+      bytes,
+    },
+  };
+}
+
+// Validasi Pesan Multipart
+export async function validateMultipartSendMessageInput(
+  formData: FormData,
+): Promise<SendMessageInput> {
+  const rawBody = formData.get('body');
+  const fileEntry = formData.get('file');
+
+  const hasFile =
+    fileEntry !== null &&
+    typeof fileEntry !== 'string' &&
+    fileEntry instanceof Blob &&
+    fileEntry.size > 0;
+
+  const fallbackBody =
+    typeof rawBody === 'string' && rawBody.trim().length > 0
+      ? rawBody
+      : hasFile
+        ? `[Lampiran: ${(fileEntry as File).name || 'berkas'}]`
+        : '';
+
+  const body = validateRequiredString(fallbackBody, 'body', {
+    minLength: 1,
+    maxLength: 10000,
+  });
+
+  if (!hasFile) {
+    return { body };
+  }
+
+  const file = fileEntry as File;
+  if (file.size > EVIDENCE_MAX_BYTES) {
+    const msg = `Ukuran lampiran melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
+    throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
+  }
+
+  if (!isEvidenceContentType(file.type)) {
+    const msg = 'Tipe lampiran percakapan hanya mendukung JPG, PNG, atau PDF.';
+    throw ApiError.uploadRejected(msg, 400, { contentType: msg });
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const validatedMeta = validateCreateEvidenceInput({
+    fileName: file.name || 'attachment',
+    contentType: file.type,
+    sizeBytes: bytes.byteLength,
+  });
+
+  assertValidFileSignature(bytes, validatedMeta.contentType);
+
+  return {
+    body,
+    attachment: {
+      fileName: validatedMeta.fileName,
+      contentType: validatedMeta.contentType,
+      sizeBytes: bytes.byteLength,
+      bytes,
+    },
+  };
 }
 
 const ASSIGN_CONVERSATION_ALLOWED_KEYS = ['assignedAdminId', 'status'] as const;
@@ -62,6 +181,7 @@ export interface UpdateConversationAdminInput {
   status?: 'open' | 'closed';
 }
 
+// Validasi Percakapan Admin
 // Validasi Pembaruan Percakapan Admin
 export function validateUpdateConversationAdminInput(
   payload: Record<string, unknown>,

@@ -10,6 +10,12 @@
 
 import { createHash } from 'node:crypto';
 import type { DocumentData } from 'firebase-admin/firestore';
+import {
+  deleteFromCloudinary,
+  downloadBytesFromCloudinary,
+  resolveActiveStorageProvider,
+  uploadBytesToCloudinary,
+} from '@/lib/cloudinary';
 import { getAdminBucket, getAdminDb } from '@/lib/firebase/admin';
 import { toIsoDateString } from '@/lib/firebase/firestore';
 import {
@@ -318,16 +324,27 @@ export async function uploadKnowledgeDocument(
   const computedSha256 = createHash('sha256').update(upload.bytes).digest('hex');
   const now = new Date();
 
-  const bucket = getAdminBucket();
-  const storageFile = bucket.file(storagePath);
+  const provider = resolveActiveStorageProvider();
 
-  await storageFile.save(Buffer.from(upload.bytes), {
-    resumable: false,
-    contentType: 'application/pdf',
-    metadata: {
-      cacheControl: 'private, no-store',
-    },
-  });
+  if (provider === 'cloudinary') {
+    await uploadBytesToCloudinary({
+      storagePath,
+      bytes: upload.bytes,
+      contentType: 'application/pdf',
+      fileName: upload.fileName,
+      deliveryType: 'private',
+    });
+  } else {
+    const bucket = getAdminBucket();
+    const storageFile = bucket.file(storagePath);
+    await storageFile.save(Buffer.from(upload.bytes), {
+      resumable: false,
+      contentType: 'application/pdf',
+      metadata: {
+        cacheControl: 'private, no-store',
+      },
+    });
+  }
 
   const initialDoc: KnowledgeDocument = {
     title: upload.title,
@@ -356,7 +373,18 @@ export async function uploadKnowledgeDocument(
     });
     await batch.commit();
   } catch (err) {
-    await storageFile.delete({ ignoreNotFound: true }).catch(() => undefined);
+    if (provider === 'cloudinary') {
+      await deleteFromCloudinary({
+        storagePath,
+        contentType: 'application/pdf',
+        deliveryType: 'private',
+      }).catch(() => undefined);
+    } else {
+      await getAdminBucket()
+        .file(storagePath)
+        .delete({ ignoreNotFound: true })
+        .catch(() => undefined);
+    }
     throw ApiError.internal(
       err instanceof Error ? err.message : 'KB document commit failed',
       'Gagal menyimpan metadata dokumen Knowledge Base.',
@@ -453,12 +481,19 @@ export async function deleteKnowledgeDocument(
 
   await batch.commit();
 
+  const provider = resolveActiveStorageProvider();
   await Promise.all([
     docData.storagePath
-      ? getAdminBucket()
-          .file(docData.storagePath)
-          .delete({ ignoreNotFound: true })
-          .catch(() => undefined)
+      ? provider === 'cloudinary'
+        ? deleteFromCloudinary({
+            storagePath: docData.storagePath,
+            contentType: 'application/pdf',
+            deliveryType: 'private',
+          }).catch(() => undefined)
+        : getAdminBucket()
+            .file(docData.storagePath)
+            .delete({ ignoreNotFound: true })
+            .catch(() => undefined)
       : Promise.resolve(),
     triggerRemoteAiDocumentDelete(documentId, requestId),
   ]);
@@ -475,7 +510,7 @@ export async function requestKnowledgeReindex(
 ): Promise<KnowledgeReindexResult> {
   const adminCaller = requireAdmin(caller);
   const db = getAdminDb();
-  const bucket = getAdminBucket();
+  const provider = resolveActiveStorageProvider();
 
   await recordAuditEvent({
     actorUid: adminCaller.uid,
@@ -503,12 +538,27 @@ export async function requestKnowledgeReindex(
     }
 
     try {
-      const [buffer] = await bucket.file(data.storagePath).download();
+      let pdfBytes: Uint8Array;
+      if (provider === 'cloudinary') {
+        const downloaded = await downloadBytesFromCloudinary({
+          storagePath: data.storagePath,
+          contentType: 'application/pdf',
+          deliveryType: 'private',
+        });
+        if (!downloaded) {
+          throw new Error('PDF_NOT_FOUND_IN_CLOUDINARY');
+        }
+        pdfBytes = downloaded;
+      } else {
+        const bucket = getAdminBucket();
+        const [buffer] = await bucket.file(data.storagePath).download();
+        pdfBytes = new Uint8Array(buffer);
+      }
       const res = await ingestKnowledgeDocumentBytes({
         docId: docSnap.id,
         title: data.title,
         version: data.version ?? 1,
-        bytes: new Uint8Array(buffer),
+        bytes: pdfBytes,
       });
       if (res.status === 'indexed') {
         indexedCount += 1;
