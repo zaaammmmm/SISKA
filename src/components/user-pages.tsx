@@ -315,7 +315,7 @@ export function UserChatPage() {
         meLabel="Kamu"
         placeholder="Tulis pesan untuk petugas..."
         helper="Pesan dikirim dengan aman dan diterima otomatis oleh petugas."
-        allowAttach={false}
+        allowAttach={true}
       />
       <div style={{ marginTop: 19 }}>
         <Note>Privasi: sampaikan hanya informasi yang diperlukan. Pesan percakapan hanya dapat dibaca oleh peserta yang berwenang.</Note>

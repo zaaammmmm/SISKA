@@ -7,7 +7,7 @@ function slugify(filename) {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '') || 'doc');
 }
-/** Format konteks persis sama dengan ctext() di notebook, supaya retrieval/BM25 konsisten. */
+// Format Konteks Chunk
 export function ctext(c) {
     const head = [c.cite, c.section, c.page ? `hlm. ${c.page}` : ''].filter(Boolean).join(' | ');
     return `[${head}]\n${c.text}`;
@@ -35,11 +35,7 @@ function splitLong(text, maxChars) {
         out.push(buf.trim());
     return out;
 }
-/**
- * Chunk markdown/teks biasa, sadar heading (#, ##, ###) mirip notebook (BAB/Pasal untuk PDF).
- * Untuk dokumen admin (profil, kontak, FAQ, pengumuman) heading markdown sudah cukup
- * untuk menjaga satu bagian tidak terpotong di tengah.
- */
+// Chunking Dokumen Markdown
 export function chunkMarkdown(text, doc) {
     const slug = slugify(doc.file);
     const lines = text.replace(/\r\n/g, '\n').split('\n');

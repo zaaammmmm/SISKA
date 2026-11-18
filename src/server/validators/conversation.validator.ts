@@ -34,7 +34,6 @@ export interface SendMessageInput {
 const CREATE_CONVERSATION_ALLOWED_KEYS = ['reportId'] as const;
 
 // Validasi Pembuatan Percakapan
-// Validasi Input Pembuatan Percakapan
 export function validateCreateConversationInput(
   payload: Record<string, unknown>,
 ): CreateConversationInput {
@@ -60,7 +59,6 @@ export function validateCreateConversationInput(
 const SEND_MESSAGE_ALLOWED_KEYS = ['body', 'attachment'] as const;
 
 // Validasi Pesan JSON
-// Validasi Input Pengiriman Pesan
 export function validateSendMessageInput(
   payload: Record<string, unknown>,
 ): SendMessageInput {
@@ -182,7 +180,6 @@ export interface UpdateConversationAdminInput {
 }
 
 // Validasi Percakapan Admin
-// Validasi Pembaruan Percakapan Admin
 export function validateUpdateConversationAdminInput(
   payload: Record<string, unknown>,
 ): UpdateConversationAdminInput {

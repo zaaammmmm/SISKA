@@ -1,10 +1,4 @@
-/**
- * SISKA — Authorization Service & RBAC Enforcement (`AuthzService`)
- * Sumber otoritas:
- * - docs/08-AUTHORIZATION-MATRIX.md
- * - docs/05-BACKEND-ARCHITECTURE.md §2.3, §4.4, §8 ("Jangan membedakan 'resource tidak ada' dengan 'resource milik orang lain' jika pembedaan membocorkan keberadaan data.")
- * - docs/09-TEST-PLAN.md (AUTH-04, REP-03, REP-04, FILE-03, CHAT-01, CHAT-02, KB-02)
- */
+// Layanan Otorisasi & RBAC
 
 import { ApiError } from '@/server/errors/api-error';
 import type { AuthenticatedCaller } from '@/server/authz/verify-token';
@@ -18,22 +12,14 @@ export interface AuthorizedCaller extends AuthenticatedCaller {
   role: UserRole;
 }
 
-/**
- * Pesan 404 seragam untuk seluruh akses tingkat-entitas (reports, evidence, conversations)
- * guna mencegah kebocoran IDOR maupun enumerasi ID (REP-03, FILE-03, CHAT-02).
- */
+// Pesan 404 Seragam
 export const INDISTINGUISHABLE_NOT_FOUND_MESSAGE =
   'Data yang diminta tidak ditemukan atau tidak tersedia untuk akun Anda.';
 
-/**
- * Helper normalisasi UID pelapor pada dokumen percakapan.
- * Mendukung nama field kanonis `reporterId` sekaligus alias `reporterUid` (docs/02-ERD.md).
- */
+// Resolusi ID Pelapor
 export function resolveConversationReporterId(
   conversation: Partial<ConversationDocument> & { reporterUid?: string | null },
 ): string {
-  // Field kanonis menang bila memang ada, termasuk saat nilainya kosong/null.
-  // Alias hanya dipakai untuk dokumen legacy yang tidak memiliki reporterId.
   const hasCanonicalField = Object.prototype.hasOwnProperty.call(
     conversation,
     'reporterId',
@@ -44,15 +30,10 @@ export function resolveConversationReporterId(
   return typeof raw === 'string' ? raw : '';
 }
 
-/**
- * Helper normalisasi UID admin yang ditugaskan pada dokumen percakapan.
- * Mendukung nama field kanonis `assignedAdminId` sekaligus alias `adminUid` (docs/02-ERD.md).
- */
+// Resolusi ID Admin
 export function resolveConversationAdminId(
   conversation: Partial<ConversationDocument> & { adminUid?: string | null },
 ): string | null {
-  // assignedAdminId adalah field kanonis. Nilai null secara eksplisit berarti
-  // belum ditugaskan dan tidak boleh ditimpa oleh alias adminUid yang stale.
   const hasCanonicalField = Object.prototype.hasOwnProperty.call(
     conversation,
     'assignedAdminId',
@@ -63,10 +44,7 @@ export function resolveConversationAdminId(
   return typeof raw === 'string' && raw.trim().length > 0 ? raw : null;
 }
 
-/**
- * Memastikan pemanggil memiliki peran sah di SISKA (`'reporter'` atau `'admin'`).
- * Menolak akun tanpa peran (mis. akun yang belum diprovisioning) dengan 403 FORBIDDEN.
- */
+// Validasi Pengguna Aktif
 export function requireAuthorizedUser(caller: AuthenticatedCaller): AuthorizedCaller {
   if (!caller.role) {
     throw ApiError.forbidden(
@@ -76,10 +54,7 @@ export function requireAuthorizedUser(caller: AuthenticatedCaller): AuthorizedCa
   return caller as AuthorizedCaller;
 }
 
-/**
- * Memastikan pemanggil memiliki peran `'admin'` yang terverifikasi lewat Custom Claim.
- * Sesuai docs/08-AUTHORIZATION-MATRIX.md & KB-02 / REP-04.
- */
+// Validasi Peran Admin
 export function requireAdmin(caller: AuthenticatedCaller): AuthorizedCaller {
   const authorized = requireAuthorizedUser(caller);
   if (authorized.role !== 'admin' || !authorized.claimVerified) {
@@ -90,9 +65,7 @@ export function requireAdmin(caller: AuthenticatedCaller): AuthorizedCaller {
   return authorized;
 }
 
-/**
- * Memastikan pemanggil memiliki peran di dalam daftar `allowedRoles` pada level endpoint.
- */
+// Validasi Daftar Peran
 export function requireRole(
   caller: AuthenticatedCaller,
   allowedRoles: readonly UserRole[],
@@ -107,12 +80,7 @@ export function requireRole(
   return authorized;
 }
 
-/**
- * Memeriksa hak baca terhadap suatu laporan (`reports/{reportId}`).
- * - Reporter hanya boleh membaca laporan miliknya sendiri (`report.reporterId === caller.uid`).
- * - Baik ketika laporan tidak ada MAUPUN ketika laporan milik orang lain, selalu melempar
- *   `404 NOT_FOUND` dengan pesan yang 100% identik (REP-03 & docs/05-BACKEND-ARCHITECTURE.md §8).
- */
+// Otorisasi Baca Laporan
 export function assertCanReadReport(
   caller: AuthenticatedCaller,
   report: ReportDocument | null | undefined,
@@ -134,13 +102,7 @@ export function assertCanReadReport(
   throw ApiError.notFound(INDISTINGUISHABLE_NOT_FOUND_MESSAGE);
 }
 
-/**
- * Memeriksa hak unggah bukti (`reports/{reportId}/evidence`).
- * Sesuai docs/08-AUTHORIZATION-MATRIX.md & docs/05-BACKEND-ARCHITECTURE.md §8:
- * - Hanya pelapor pemilik laporan yang dapat menambahkan bukti pada laporannya.
- * - Baik ketika `report` tidak ada maupun milik pelapor lain, melempar `404 NOT_FOUND`
- *   dengan pesan yang 100% seragam agar tidak bisa dipakai untuk enumerasi ID laporan.
- */
+// Otorisasi Unggah Bukti
 export function assertCanUploadEvidence(
   caller: AuthenticatedCaller,
   report: ReportDocument | null | undefined,
@@ -158,13 +120,7 @@ export function assertCanUploadEvidence(
   throw ApiError.notFound(INDISTINGUISHABLE_NOT_FOUND_MESSAGE);
 }
 
-/**
- * Memeriksa hak unduh bukti (`reports/{reportId}/evidence/{evidenceId}/download`).
- * Sesuai docs/08-AUTHORIZATION-MATRIX.md, FILE-03, & docs/05-BACKEND-ARCHITECTURE.md §8:
- * - Hanya pemilik laporan (`reporterId === caller.uid`) atau admin berwenang yang boleh meminta Signed URL.
- * - Baik ketika laporan tidak ditemukan maupun ketika laporan milik orang lain,
- *   selalu melempar `404 NOT_FOUND` dengan pesan yang 100% seragam (mencegah enumerasi ID / IDOR).
- */
+// Otorisasi Unduh Bukti
 export function assertCanDownloadEvidence(
   caller: AuthenticatedCaller,
   report: ReportDocument | null | undefined,
@@ -186,15 +142,7 @@ export function assertCanDownloadEvidence(
   throw ApiError.notFound(INDISTINGUISHABLE_NOT_FOUND_MESSAGE);
 }
 
-/**
- * Memeriksa hak akses baca/kirim pesan pada percakapan (`conversations/{conversationId}`).
- * Sesuai docs/08-AUTHORIZATION-MATRIX.md, CHAT-01, CHAT-02, & docs/05-BACKEND-ARCHITECTURE.md §8:
- * - Reporter hanya boleh mengakses percakapan miliknya (`reporterId === caller.uid`).
- * - Admin hanya boleh mengakses percakapan yang ditugaskan kepadanya (`assignedAdminId === caller.uid`)
- *   atau percakapan yang belum memiliki petugas (`assignedAdminId === null`).
- * - Baik ketika percakapan tidak ada maupun milik peserta lain, selalu melempar `404 NOT_FOUND`
- *   dengan pesan yang 100% identik sehingga ID percakapan tidak dapat dienumerasi (Anti-IDOR).
- */
+// Otorisasi Akses Percakapan
 export function assertCanAccessConversation(
   caller: AuthenticatedCaller,
   conversation:

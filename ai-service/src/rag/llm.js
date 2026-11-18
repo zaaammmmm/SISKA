@@ -31,7 +31,7 @@ async function fetchJson(url, body, timeoutMs) {
         clearTimeout(t);
     }
 }
-/** Embed satu atau beberapa teks. Dipakai untuk query saja (indeks dokumen sudah diembed di notebook). */
+// Pembuatan Embedding Teks
 export async function embed(baseUrl, texts) {
     const out = [];
     const bs = 16;
@@ -40,12 +40,12 @@ export async function embed(baseUrl, texts) {
         const data = await fetchJson(`${baseUrl.replace(/\/$/, '')}/api/embed`, { model: embedModel(), input: batch }, 60_000);
         out.push(...data.embeddings);
     }
-    // normalisasi L2, sama seperti embed() di notebook
     return out.map((v) => {
         const norm = Math.sqrt(v.reduce((a, x) => a + x * x, 0)) || 1e-9;
         return v.map((x) => x / norm);
     });
 }
+// Panggilan Chat LLM
 export async function chat(baseUrl, system, user) {
     const opts = genOpts();
     const data = await fetchJson(`${baseUrl.replace(/\/$/, '')}/api/chat`, {
@@ -61,6 +61,7 @@ export async function chat(baseUrl, system, user) {
     const text = data?.message?.content ?? '';
     return text.replace(THINK_RE, '').trim();
 }
+// Cek Koneksi Ollama
 export async function pingOllama(baseUrl) {
     if (!baseUrl)
         return { up: false, error: 'URL kosong.' };
@@ -69,7 +70,6 @@ export async function pingOllama(baseUrl) {
         const t = setTimeout(() => ctrl.abort(), 8000);
         const r = await fetch(`${baseUrl.replace(/\/$/, '')}/api/tags`, {
             signal: ctrl.signal,
-            // beberapa quick-tunnel (cloudflared) menolak request tanpa User-Agent / Accept
             headers: { Accept: 'application/json', 'User-Agent': 'siska-rag-test-app' },
         });
         clearTimeout(t);

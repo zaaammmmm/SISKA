@@ -1,12 +1,4 @@
-/**
- * SISKA — User Profile Domain Service (`ProfileService`)
- * Sumber otoritas:
- * - docs/01-SRS.md FR-002, FR-004, FR-014
- * - docs/02-ERD.md §4 (`users`: uid, displayName, email, role, createdAt, updatedAt)
- * - docs/04-API-SPEC.yaml (/profile GET & PATCH)
- * - docs/08-AUTHORIZATION-MATRIX.md ("User profile: Reporter (own) R/U allowlisted fields")
- * - docs/09-TEST-PLAN.md AUTH-01, AUTH-04
- */
+// Layanan Domain Profil
 
 import type { DocumentData } from 'firebase-admin/firestore';
 import {
@@ -40,7 +32,7 @@ import type { UserDocument, UserRole } from '@/types/domain';
 
 export type { SerializedUserProfile };
 
-// Resolusi URL Foto Profil
+// Resolusi URL Avatar
 function resolveAvatarUrl(data: DocumentData): string | null | undefined {
   if (typeof data.photoUrl === 'string' && data.photoUrl.trim().length > 0) {
     return data.photoUrl;
@@ -61,6 +53,7 @@ function resolveAvatarUrl(data: DocumentData): string | null | undefined {
   return undefined;
 }
 
+// Serialisasi Dokumen Pengguna
 function serializeUserDoc(
   uid: string,
   data: DocumentData,
@@ -77,10 +70,7 @@ function serializeUserDoc(
   };
 }
 
-/**
- * Mengambil profil pengguna aktif (`GET /api/v1/profile`).
- * Menolak setiap akun tanpa hak akses sah (`requireAuthorizedUser`) secara murni berdasarkan RBAC.
- */
+// Ambil Profil Pengguna
 export async function getMyProfile(
   caller: AuthenticatedCaller,
 ): Promise<SerializedUserProfile> {
@@ -96,16 +86,7 @@ export async function getMyProfile(
   return serializeUserDoc(authorized.uid, snap.data() as DocumentData);
 }
 
-/**
- * Memperbarui field profil yang diizinkan (`PATCH /api/v1/profile`).
- *
- * Aturan Keamanan (FR-004, FR-014, AUTH-04, 08-AUTHORIZATION-MATRIX.md):
- * - Wajib lolos `requireAuthorizedUser(caller)` (tanpa hardcoded UID akun uji apa pun).
- * - Akun yang tidak memiliki Custom Claim role maupun dokumen profil `users/{uid}`
- *   otomatis ditolak dengan `403 FORBIDDEN`.
- * - Hanya `displayName`, foto profil (`avatarPath`/`photoUrl`), dan `updatedAt` yang dapat diperbarui;
- *   `role`, `uid`, `email`, dan `createdAt` dikunci.
- */
+// Pembaruan Profil Pengguna
 export async function updateMyProfile(
   caller: AuthenticatedCaller,
   input: UpdateProfileInput,
@@ -114,8 +95,8 @@ export async function updateMyProfile(
   const authorized = requireAuthorizedUser(caller);
   const db = getAdminDb();
   const userRef = db.collection('users').doc(authorized.uid);
-
   const provider = resolveActiveStorageProvider();
+
   let uploadedAvatarPath: string | null = null;
   let uploadedPhotoUrl: string | null = null;
 
@@ -190,7 +171,6 @@ export async function updateMyProfile(
       });
     });
   } catch (txError) {
-    // Kompensasi: hapus foto yatim bila transaksi Firestore gagal.
     if (uploadedAvatarPath && input.avatar) {
       if (provider === 'cloudinary') {
         await deleteFromCloudinary({
@@ -209,11 +189,7 @@ export async function updateMyProfile(
   }
 }
 
-/**
- * Menginisialisasi profil `reporter` baru saat registrasi awal (`POST /api/v1/profile`).
- * Hanya dapat dijalankan satu kali bila dokumen `users/{uid}` belum ada, menetapkan
- * `role: 'reporter'` secara eksklusif dari sisi server (FR-002, FR-004, AUTH-01).
- */
+// Inisialisasi Profil Reporter
 export async function provisionReporterProfile(
   caller: AuthenticatedCaller,
   input: UpdateProfileInput,

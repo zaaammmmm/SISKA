@@ -1,12 +1,4 @@
-/**
- * SISKA — Conversation & Message Domain Service (`ConversationService`)
- * Sumber otoritas:
- * - docs/01-SRS.md FR-010
- * - docs/02-ERD.md §2, §4 (`conversations`, `messages`)
- * - docs/04-API-SPEC.yaml (/conversations, /conversations/{conversationId}/messages)
- * - docs/08-AUTHORIZATION-MATRIX.md
- * - docs/09-TEST-PLAN.md CHAT-01, CHAT-02, CHAT-03
- */
+// Layanan Domain Percakapan
 
 import type { DocumentData } from 'firebase-admin/firestore';
 import {
@@ -66,6 +58,7 @@ export type {
   SerializedMessage,
 };
 
+// Serialisasi Dokumen Percakapan
 function serializeConversationDoc(
   id: string,
   data: DocumentData,
@@ -91,6 +84,7 @@ function serializeConversationDoc(
   };
 }
 
+// Serialisasi Dokumen Pesan
 function serializeMessageDoc(id: string, data: DocumentData): SerializedMessage {
   return {
     id,
@@ -103,11 +97,7 @@ function serializeMessageDoc(id: string, data: DocumentData): SerializedMessage 
   };
 }
 
-/**
- * Menghitung pesan masuk yang belum dibaca berdasarkan receipt per UID.
- * Receipt disimpan di conversations/{id}/readReceipts/{uid}, sehingga status baca
- * admin yang berbeda tidak saling memengaruhi pada percakapan yang belum ditugaskan.
- */
+// Hitung Pesan Belum Dibaca
 async function getUnreadMessageCount(
   conversationId: string,
   uid: string,
@@ -123,12 +113,7 @@ async function getUnreadMessageCount(
   return snapshot.docs.filter((doc) => doc.get('senderUid') !== uid).length;
 }
 
-/**
- * Mengambil daftar percakapan (`GET /api/v1/conversations`) dengan amplop standar `{ items, nextCursor }`.
- * - Reporter hanya melihat percakapan miliknya (`reporterId == caller.uid`).
- * - Admin melihat percakapan yang ditugaskan kepadanya (`assignedAdminId == caller.uid`)
- *   serta percakapan yang belum ditugaskan (`assignedAdminId == null`).
- */
+// Daftar Percakapan Pengguna
 export async function listConversations(
   caller: AuthenticatedCaller,
 ): Promise<PaginatedConversationsResult> {
@@ -150,7 +135,6 @@ export async function listConversations(
     return { items, nextCursor: null };
   }
 
-  // Untuk Admin: ambil percakapan yang ditugaskan ke admin ini + percakapan belum ditugaskan
   const [assignedSnap, unassignedSnap] = await Promise.all([
     db
       .collection('conversations')
@@ -182,12 +166,7 @@ export async function listConversations(
   return { items, nextCursor: null };
 }
 
-/**
- * Membuka atau membuat percakapan baru secara atomik (`POST /api/v1/conversations`).
- * - Berjalan di dalam satu Firestore Transaction (`db.runTransaction`) dengan ID dokumen deterministik
- *   untuk mencegah *race condition* (percakapan ganda saat terjadi request konkuren).
- * - Hanya `reporter` yang dapat menginisiasi percakapan miliknya (atau terkait laporan miliknya).
- */
+// Buka atau Buat Percakapan
 export async function createOrOpenConversation(
   caller: AuthenticatedCaller,
   input: CreateConversationInput,
@@ -276,10 +255,7 @@ export async function createOrOpenConversation(
   });
 }
 
-/**
- * Mengambil daftar pesan dalam suatu percakapan (`GET /api/v1/conversations/{conversationId}/messages`).
- * Menegakkan `assertCanAccessConversation(caller, convData, 'read')` (CHAT-02 — 404 anti-IDOR).
- */
+// Daftar Pesan Percakapan
 export async function listMessages(
   caller: AuthenticatedCaller,
   conversationId: string,
@@ -350,13 +326,7 @@ export async function listMessages(
   };
 }
 
-/**
- * Mengirim pesan baru pada percakapan (`POST /api/v1/conversations/{conversationId}/messages`).
- * - Menegakkan `assertCanAccessConversation` (CHAT-01, CHAT-02 — 404 anti-IDOR).
- * - Bila percakapan belum memiliki petugas (`assignedAdminId === null`) dan pengirim adalah Admin sah,
- *   secara otomatis menugaskan percakapan tersebut kepada Admin pengirim dalam satu transaksi.
- * - `senderUid` diturunkan dari token terverifikasi, tidak pernah diambil dari payload client.
- */
+// Pengiriman Pesan Baru
 export async function sendMessage(
   caller: AuthenticatedCaller,
   conversationId: string,
@@ -371,9 +341,6 @@ export async function sendMessage(
   let uploadedAttachmentPath: string | null = null;
   let uploadedContentType: string | undefined;
 
-  // Lampiran diunggah SEBELUM transaksi Firestore. Otorisasi (termasuk klaim admin
-  // pada percakapan yang belum ditugaskan) diperiksa lebih dulu agar pengguna tak
-  // berwenang tidak pernah dapat menulis berkas ke storage.
   if (input.attachment) {
     const preSnap = await convRef.get();
     const preData = preSnap.exists
@@ -432,8 +399,6 @@ export async function sendMessage(
         ? await tx.get(db.collection('users').where('role', '==', 'admin'))
         : null;
 
-      // Jika admin membalas percakapan yang belum ditugaskan (`assignedAdminId === null`),
-      // klaim penugasan untuk admin tersebut; jika sudah ditugaskan ke admin lain atau tidak ada, assertCanAccessConversation akan menolak secara seragam (404).
       const effectiveConvData: ConversationDocument | null =
         convData && authorized.role === 'admin' && !assignedAdminId
           ? { ...convData, assignedAdminId: authorized.uid }
@@ -459,8 +424,6 @@ export async function sendMessage(
       tx.create(msgRef, msgData);
       tx.update(convRef, {
         updatedAt: now,
-        // Metadata ringkas ini membuat preview daftar chat ikut realtime
-        // melalui listener dokumen conversations tanpa listener tambahan per pesan.
         lastMessage: input.body.slice(0, 180),
         lastMessageSenderUid: authorized.uid,
         lastMessageAt: now,
@@ -469,7 +432,6 @@ export async function sendMessage(
           : {}),
       });
 
-      // Otomatis kirim In-App Notification kepada lawan bicara di percakapan
       const reporterId = resolveConversationReporterId(convData!);
       const recipientUid =
         authorized.role === 'reporter' ? assignedAdminId : reporterId;
@@ -478,9 +440,6 @@ export async function sendMessage(
         ? [recipientUid]
         : (unassignedAdminUsers?.docs ?? []).map((adminUser) => adminUser.id);
       for (const targetUid of notificationRecipients) {
-        // ID deterministik: satu notifikasi per percakapan per penerima. Pesan berikutnya
-        // memperbarui notifikasi yang sama (kembali "belum dibaca" + naik ke atas daftar)
-        // sehingga lonceng tidak dibanjiri satu item per pesan.
         const notifRef = db.collection('users').doc(targetUid)
           .collection('notifications').doc(`chat_${conversationId}`);
         tx.set(notifRef, {
@@ -490,7 +449,6 @@ export async function sendMessage(
           body: 'Anda menerima pesan baru pada ruang percakapan SISKA.',
           targetType: 'conversation',
           targetId: conversationId,
-          // Dipakai badge untuk menghitung jumlah pengguna, bukan jumlah pesan.
           senderUid: authorized.uid,
           isRead: false,
           readAt: null,
@@ -501,7 +459,6 @@ export async function sendMessage(
       return serializeMessageDoc(msgRef.id, msgData);
     });
   } catch (txError) {
-    // Kompensasi: hapus lampiran yatim bila transaksi Firestore gagal.
     if (uploadedAttachmentPath) {
       if (provider === 'cloudinary') {
         await deleteFromCloudinary({
@@ -522,11 +479,7 @@ export async function sendMessage(
   return createdMessage;
 }
 
-/**
- * Mengotorisasi pengunduhan/pratinjau lampiran pesan dan menerbitkan Signed URL singkat
- * (`GET /api/v1/conversations/{conversationId}/messages/{messageId}/attachment`).
- * Hanya peserta sah percakapan; selain itu 404 seragam (anti-IDOR).
- */
+// Otorisasi Unduhan Lampiran
 export async function authorizeMessageAttachmentDownload(
   caller: AuthenticatedCaller,
   conversationId: string,
@@ -609,10 +562,7 @@ export async function authorizeMessageAttachmentDownload(
   return signedResult;
 }
 
-/**
- * Menandai seluruh pesan masuk pada percakapan sebagai telah dibaca untuk UID caller.
- * Receipt per pengguna menjaga isolasi status baca, termasuk chat admin yang belum ditugaskan.
- */
+// Tandai Percakapan Terbaca
 export async function markConversationAsRead(
   caller: AuthenticatedCaller,
   conversationId: string,
@@ -638,7 +588,6 @@ export async function markConversationAsRead(
     updatedAt: now,
   }, { merge: true });
 
-  // Notifikasi untuk percakapan yang sama ikut menjadi read ketika ruang chat dibuka.
   const relatedNotifications = await db.collection('users').doc(caller.uid)
     .collection('notifications')
     .where('targetId', '==', conversationId)
@@ -658,10 +607,7 @@ export async function markConversationAsRead(
   return { conversationId, readAt: now.toISOString(), previousReadAt };
 }
 
-/**
- * Mengambil detail metadata suatu percakapan (`GET /api/v1/conversations/{conversationId}`).
- * Menegakkan `assertCanAccessConversation(caller, convData, 'read')` secara seragam (404 anti-IDOR).
- */
+// Detail Percakapan
 export async function getConversationById(
   caller: AuthenticatedCaller,
   conversationId: string,
@@ -677,11 +623,7 @@ export async function getConversationById(
   return serializeConversationDoc(convSnap.id, convData as DocumentData);
 }
 
-/**
- * Memperbarui penugasan petugas (`assignedAdminId`) atau status (`open` | `closed`) percakapan
- * oleh Admin berwenang (`PATCH /api/v1/conversations/{conversationId}`).
- * Berjalan secara atomik di dalam Firestore Transaction dan mencatat `auditEvents` (`conversation.updated`).
- */
+// Pembaruan Percakapan Admin
 export async function updateConversationByAdmin(
   caller: AuthenticatedCaller,
   conversationId: string,

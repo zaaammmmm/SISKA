@@ -2,15 +2,7 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // SISKA tidak menggunakan Firebase Storage Client SDK untuk unggah/baca.
-    // Bukti dan PDF Knowledge Base diakses melalui Route Handler yang memeriksa
-    // role/ownership, lalu memakai Firebase Admin SDK atau Signed URL berumur
-    // singkat. Admin SDK dan Google Cloud Storage Signed URL tidak dievaluasi
-    // oleh Firebase Storage Security Rules.
-    //
-    // Karena itu, semua akses langsung dari Client SDK ditolak. Jangan membuka
-    // path tertentu tanpa merancang ulang validasi ukuran/MIME, metadata,
-    // checksum, audit, finalisasi upload, serta pengujian lintas akun.
+    // Default Deny Storage
     match /{allPaths=**} {
       allow read, write: if false;
     }

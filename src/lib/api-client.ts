@@ -208,10 +208,6 @@ export async function updateMyProfileName(
   });
 }
 
-/**
- * Memperbarui nama tampilan beserta foto profil opsional (`multipart/form-data`).
- * Tanpa berkas, jatuh kembali ke pembaruan nama via JSON.
- */
 export async function updateMyProfileWithAvatar(params: {
   displayName: string;
   avatarFile?: File | null;
@@ -219,11 +215,9 @@ export async function updateMyProfileWithAvatar(params: {
   if (!params.avatarFile) {
     return updateMyProfileName(params.displayName);
   }
-
   const formData = new FormData();
   formData.append('displayName', params.displayName);
   formData.append('avatar', params.avatarFile);
-
   return apiRequest<SerializedUserProfile>('/profile', {
     method: 'PATCH',
     formData,
@@ -448,7 +442,6 @@ export async function postConversationMessage(
       },
     );
   }
-
   return apiRequest<SerializedMessage>(
     `/conversations/${encodeURIComponent(conversationId)}/messages`,
     {
@@ -458,7 +451,6 @@ export async function postConversationMessage(
   );
 }
 
-/** Meminta Signed URL pendek untuk melihat/mengunduh lampiran pesan. */
 export async function fetchMessageAttachmentSignedUrl(
   conversationId: string,
   messageId: string,
@@ -829,6 +821,10 @@ export const siskaApi = {
     ask: askSiskaAiQuestion,
   },
   admin: {
+    listAiRagDocuments: fetchAiRagDocumentsByAdmin,
+    addAiRagDocument: addAiRagDocumentByAdmin,
+    uploadAiRagPdf: uploadAiRagPdfByAdmin,
+    deleteAiRagDocument: deleteAiRagDocumentByAdmin,
     listKnowledgeDocuments: fetchKnowledgeDocumentsByAdmin,
     uploadKnowledgePdf: uploadKnowledgePdfByAdmin,
     deleteKnowledgeDocument: deleteKnowledgeDocumentByAdmin,

@@ -1,6 +1,6 @@
+// Sanitasi Input Teks
 export function sanitize(s, limit) {
     let out = (s || '').normalize('NFKC');
-    // hapus karakter kontrol + beberapa karakter arah/zero-width yang dipakai untuk injeksi
     out = out.replace(/[\x00-\x08\x0b-\x1f\x7f\u200b-\u200f\u202a-\u202e]/g, '');
     out = out.replace(/\s+/g, ' ').trim();
     out = out.replace(/(.)\1{9,}/g, '$1$1$1');
@@ -95,7 +95,7 @@ export function cleanHistory(h, turns, chars) {
 export function renderHistory(h) {
     return h.map((m) => (m.role === 'user' ? 'Pengguna: ' : 'Asisten: ') + m.text).join('\n');
 }
-// --- Rate limiter sederhana, dalam memori proses (cukup untuk uji lokal) ---
+// Rate Limiter Memori
 export class Limiter {
     limits;
     clock;

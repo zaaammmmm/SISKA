@@ -65,7 +65,6 @@ function parseAvatarObject(rawAvatar: unknown): ProfileAvatarUploadInput {
 }
 
 // Validasi Profil JSON
-// Validasi Input Pembaruan Profil
 export function validateUpdateProfileInput(
   payload: Record<string, unknown>,
 ): UpdateProfileInput {

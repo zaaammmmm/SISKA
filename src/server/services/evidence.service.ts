@@ -1,12 +1,4 @@
-/**
- * SISKA — Evidence Domain Service (`EvidenceService`)
- * Sumber otoritas:
- * - docs/01-SRS.md FR-007, NFR-REL-01
- * - docs/02-ERD.md §2, §4, §6 ("Metadata evidence ditulis setelah upload sukses; jika insert gagal, hapus file sebagai kompensasi")
- * - docs/04-API-SPEC.yaml (/reports/{reportId}/evidence, /reports/{reportId}/evidence/{evidenceId}/download)
- * - docs/05-BACKEND-ARCHITECTURE.md §4.6 & §5
- * - docs/09-TEST-PLAN.md FILE-01..FILE-04
- */
+// Layanan Domain Bukti
 
 import { createHash } from 'node:crypto';
 import {
@@ -59,10 +51,7 @@ export type {
   SignedDownloadUrlResult,
 };
 
-/**
- * Menghasilkan URL bertanda tangan (Signed URL) berdurasi singkat (maksimal 5 menit / 300 detik).
- * Pada mode Firebase Storage Emulator (tanpa IAM service account key), menggunakan endpoint emulator lokal.
- */
+// Pembuatan Signed URL
 async function buildShortLivedStorageUrl(
   storagePath: string,
   action: 'read' | 'write',
@@ -124,11 +113,7 @@ async function buildShortLivedStorageUrl(
   return { url, expiresInSeconds };
 }
 
-/**
- * Menyimpan biner bukti yang telah tervalidasi ke Cloud Storage privat,
- * lalu menulis metadata ke `reports/{reportId}/evidence/{evidenceId}` + `auditEvents`
- * dengan kompensasi penghapusan file otomatis bila penulisan Firestore gagal (docs/02-ERD.md §6 & FILE-04).
- */
+// Penyimpanan Biner Bukti
 async function persistVerifiedEvidenceBytes(params: {
   reportId: string;
   evidenceId: string;
@@ -161,7 +146,6 @@ async function persistVerifiedEvidenceBytes(params: {
     throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
   }
 
-  // Inspeksi signature biner (Magic Bytes) untuk menolak spoofed MIME / executable (FILE-02)
   assertValidFileSignature(bytes, contentType);
 
   const computedSha256 = createHash('sha256').update(bytes).digest('hex');
@@ -178,8 +162,6 @@ async function persistVerifiedEvidenceBytes(params: {
     .collection('evidence')
     .doc(evidenceId);
 
-  // Tolak ID bukti yang sudah tercatat sebelum menyentuh storage, agar unggahan
-  // ulang tidak menimpa berkas milik metadata yang sudah ada.
   const existingSnap = await evidenceRef.get();
   if (existingSnap.exists) {
     throw ApiError.conflict(
@@ -235,7 +217,6 @@ async function persistVerifiedEvidenceBytes(params: {
     });
     await batch.commit();
   } catch (dbError) {
-    // Kompensasi penghapusan file yatim jika penyimpanan metadata ke Firestore gagal (FILE-04 / NFR-REL-01)
     if (provider === 'cloudinary') {
       await deleteFromCloudinary({
         storagePath,
@@ -273,20 +254,7 @@ async function persistVerifiedEvidenceBytes(params: {
   };
 }
 
-/**
- * Menangani alur JSON pada `POST /api/v1/reports/{reportId}/evidence`.
- *
- * Mematuhi secara ketat `docs/02-ERD.md §6` ("Metadata evidence ditulis setelah upload sukses"):
- * 1. Jika `input.contentBase64` disertakan: langsung mendekode biner, memeriksa Magic Bytes,
- *    menyimpan ke Cloud Storage, lalu menulis metadata ke Firestore.
- * 2. Jika `input.evidenceId` disertakan (Tahap Finalisasi setelah client upload ke Signed URL):
- *    memverifikasi bahwa objek benar-benar sudah ada di Cloud Storage, memeriksa ukuran riil (`<= 5 MiB`),
- *    memeriksa Magic Bytes (`assertValidFileSignature`), menghitung SHA-256 (menghapus objek jika tidak valid),
- *    dan HANYA menulis dokumen `reports/{reportId}/evidence/{evidenceId}` setelah seluruh verifikasi lulus.
- * 3. Jika hanya `{ fileName, contentType, sizeBytes }` (Tahap Inisiasi Signed Upload):
- *    menerbitkan `uploadUrl` berdurasi 5 menit + `evidenceId` TANPA menulis dokumen ke Firestore terlebih dahulu,
- *    sehingga mustahil menimbulkan metadata yatim bila unggahan client batal/gagal!
- */
+// Registrasi Unggahan Bukti
 export async function registerEvidenceUpload(
   caller: AuthenticatedCaller,
   reportId: string,
@@ -303,9 +271,8 @@ export async function registerEvidenceUpload(
 
   const authorized = assertCanUploadEvidence(caller, reportData);
 
-  // Mode 1: Payload biner dikirim sebagai base64 di dalam JSON
+  // Mode Base64 JSON
   if (input.contentBase64) {
-    // Tolak payload base64 berlebih sebelum didekode agar tidak memboroskan memori.
     const maxBase64Chars = Math.ceil((EVIDENCE_MAX_BYTES * 4) / 3) + 1024;
     if (input.contentBase64.length > maxBase64Chars) {
       const msg = `Ukuran berkas melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
@@ -332,7 +299,7 @@ export async function registerEvidenceUpload(
     });
   }
 
-  // Mode 2: Finalisasi Signed Upload — verifikasi objek di Storage sebelum tulis metadata ke Firestore
+  // Mode Finalisasi Upload
   if (input.evidenceId) {
     const evidenceRef = reportRef.collection('evidence').doc(input.evidenceId);
     const existingEvidenceSnap = await evidenceRef.get();
@@ -451,7 +418,6 @@ export async function registerEvidenceUpload(
         },
       };
     } catch (verifyOrDbError) {
-      // Hapus objek dari Storage bila gagal validasi signature/ukuran atau gagal commit ke Firestore (FILE-02 & FILE-04)
       if (provider === 'cloudinary') {
         await deleteFromCloudinary({
           storagePath,
@@ -476,7 +442,7 @@ export async function registerEvidenceUpload(
     }
   }
 
-  // Mode 3: Inisiasi Signed Upload URL (Belum menulis dokumen ke Firestore agar bebas metadata yatim)
+  // Mode Inisiasi Upload
   const evidenceId = reportRef.collection('evidence').doc().id;
   const ext = extensionForEvidenceType(input.contentType);
   const storagePath = `reports/${reportId}/evidence/${evidenceId}.${ext}`;
@@ -496,11 +462,7 @@ export async function registerEvidenceUpload(
   };
 }
 
-/**
- * Mengunggah berkas biner bukti langsung melalui server (`multipart/form-data`)
- * lengkap dengan pemeriksaan Magic Bytes (`FILE-02`), perhitungan SHA-256,
- * dan rollback/kompensasi otomatis bila penulisan metadata Firestore gagal (`FILE-04` & `NFR-REL-01`).
- */
+// Unggahan Multipart Bukti
 export async function uploadEvidenceBinary(
   caller: AuthenticatedCaller,
   reportId: string,
@@ -529,7 +491,6 @@ export async function uploadEvidenceBinary(
 
   const file = fileEntry as File;
 
-  // Periksa ukuran dari metadata File sebelum membaca isi ke memori.
   if (file.size < 1) {
     throw ApiError.uploadRejected('Berkas bukti tidak boleh kosong.', 400, {
       file: 'Berkas bukti tidak boleh kosong.',
@@ -564,12 +525,7 @@ export async function uploadEvidenceBinary(
   });
 }
 
-/**
- * Mengotorisasi pengunduhan bukti dan menerbitkan Signed URL berdurasi singkat (maks. 5 menit)
- * (`GET /api/v1/reports/{reportId}/evidence/{evidenceId}/download`).
- * Sesuai docs/08-AUTHORIZATION-MATRIX.md & FILE-03:
- * Menolak akses lintas pengguna maupun bukti tidak ditemukan dengan `404 NOT_FOUND` seragam (Anti-IDOR).
- */
+// Otorisasi Unduhan Bukti
 export async function authorizeEvidenceDownload(
   caller: AuthenticatedCaller,
   reportId: string,

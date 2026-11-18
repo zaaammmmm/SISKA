@@ -18,14 +18,7 @@ function embPath() {
 function manifestPath() {
     return path.join(EXPORT_DIR, 'manifest.json');
 }
-/**
- * NOTE desain: fungsi-fungsi di file ini (listDocs/addDocument/deleteDocument) adalah
- * satu-satunya tempat yang tahu bahwa penyimpanan saat ini berupa file JSON + .f32 di
- * disk. Saat pindah ke database sungguhan (mis. Postgres+pgvector/Supabase), cukup
- * tulis ulang isi 3 fungsi ini dengan query DB -- lib/retrieve.ts, lib/rag.ts, dan
- * seluruh UI TIDAK perlu diubah selama bentuk Chunk[] & Float32Array yang dikembalikan
- * loadIndex() tetap sama.
- */
+// Daftar Dokumen Indeks
 export function listDocs() {
     const idx = loadIndex();
     const byDoc = new Map();
@@ -34,8 +27,6 @@ export function listDocs() {
         cur.count += 1;
         byDoc.set(c.doc, cur);
     }
-    // dokumen yang diingest lewat notebook ada di manifest asli; dokumen yang
-    // ditambahkan lewat web ditandai lewat file data/export/web-docs.json
     const webDocs = new Set(readWebDocRegistry().map((d) => d.file));
     return [...byDoc.entries()].map(([file, v]) => ({
         file,
@@ -64,17 +55,12 @@ function readAll() {
 }
 function writeAll(chunks, embFlat, manifest) {
     fs.mkdirSync(EXPORT_DIR, { recursive: true });
-    // tulis ke berkas sementara lalu rename, agar indeks tidak rusak bila proses mati di tengah penulisan
     writeAtomic(chunksPath(), JSON.stringify(chunks));
     writeAtomic(embPath(), Buffer.from(embFlat.buffer, embFlat.byteOffset, embFlat.byteLength));
     const newManifest = { ...manifest, n: chunks.length, ids: chunks.map((c) => c.id) };
     writeAtomic(manifestPath(), JSON.stringify(newManifest, null, 2));
 }
-/**
- * Tambah dokumen baru (markdown/teks) dari upload admin: chunk -> embed (pakai backend
- * aktif saat ini) -> append ke chunks.json & embeddings.f32 -> catat di registry.
- * Melempar error jika dokumen dengan nama file yang sama sudah ada (pakai deleteDocument dulu).
- */
+// Tambah Dokumen Baru
 export async function addDocument(file, cite, content, embedBaseUrl) {
     const { chunks, embFlat, manifest } = readAll();
     if (chunks.some((c) => c.doc === file)) {
@@ -100,9 +86,10 @@ export async function addDocument(file, cite, content, embedBaseUrl) {
     const registry = readWebDocRegistry().filter((d) => d.file !== file);
     registry.push({ file, cite, addedAt: new Date().toISOString() });
     writeWebDocRegistry(registry);
-    loadIndex(true); // invalidate cache so the next request sees the update
+    loadIndex(true);
     return { addedChunks: newChunks.length };
 }
+// Hapus Dokumen Indeks
 export async function deleteDocument(file) {
     const { chunks, embFlat, manifest } = readAll();
     const dim = manifest.dim;

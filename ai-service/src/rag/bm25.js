@@ -1,4 +1,4 @@
-// Port 1:1 dari sel 11 notebook (STOP, tok, class Index.bm25).
+// Indeks BM25
 export function makeTokenizer(stopWords) {
     const STOP = new Set(stopWords);
     return function tok(s) {

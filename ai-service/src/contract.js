@@ -1,13 +1,8 @@
-/**
- * Adapter hasil RAG -> kontrak `POST /chat` SISKA (lihat src/server/contracts/ai-service.contract.ts).
- *
- * Yang SENGAJA tidak ikut dikirim ke frontend: nama rute internal (answered, smalltalk, ...),
- * nama backend model (local/colab), dan latensi. Semua itu hanya untuk log server.
- */
+// Adapter Respons Kontrak
 
 const GROUNDED_ROUTES = new Set(['answered', 'curhat', 'contacts', 'emergency']);
 
-/** Gabungkan sumber per dokumen, urut kemunculan. */
+// Normalisasi Sumber Sitasi
 function toCitationSources(sources) {
   const seen = new Set();
   const out = [];

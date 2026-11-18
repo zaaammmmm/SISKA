@@ -1,10 +1,4 @@
-/**
- * SISKA — In-App Notification Domain Service (`NotificationService`)
- * Sumber otoritas:
- * - docs/05-BACKEND-ARCHITECTURE.md §2.3, §4 (Request Flow), §8 (Error Contract)
- * - docs/07-FRONTEND-ARCHITECTURE.md §6 ("Mask sensitive content in notifications")
- * - docs/08-AUTHORIZATION-MATRIX.md (Self-only access, Admin broadcast)
- */
+// Layanan Domain Notifikasi
 
 import type {
   DocumentData,
@@ -36,6 +30,7 @@ import type {
   NotificationType,
 } from '@/types/domain';
 
+// Serialisasi Dokumen Notifikasi
 function serializeNotificationDoc(
   id: string,
   data: DocumentData,
@@ -66,10 +61,7 @@ export interface CreateNotificationParams {
   transaction?: Transaction;
 }
 
-/**
- * Menyuntikkan notifikasi ke sub-koleksi `users/{recipientUid}/notifications/{id}`.
- * Dapat dieksekusi secara mandiri atau disematkan ke dalam Transaction/WriteBatch service lain.
- */
+// Pembuatan Notifikasi Baru
 export async function createNotification(
   params: CreateNotificationParams,
 ): Promise<SerializedNotificationItem> {
@@ -106,10 +98,7 @@ export async function createNotification(
   return serializeNotificationDoc(docRef.id, docData);
 }
 
-/**
- * Mengambil daftar notifikasi milik pengguna yang sedang login (`GET /api/v1/notifications`).
- * Dilengkapi paginasi cursor dan filter unreadOnly.
- */
+// Daftar Notifikasi Pengguna
 export async function listUserNotifications(
   caller: AuthenticatedCaller,
   query: ListNotificationsQuery,
@@ -159,14 +148,7 @@ export async function listUserNotifications(
   };
 }
 
-/**
- * Menghitung badge notifikasi yang belum dibaca (lonceng topbar + badge sidebar).
- *
- * Hitungan DIDEDUPLIKASI per sumber, bukan per dokumen notifikasi:
- * - laporan   : 1 per laporan berbeda (status berubah 3x di laporan yang sama = 1).
- * - percakapan: 1 per PENGGUNA berbeda (pelapor dengan 20 pesan belum dibaca = 1).
- * - lainnya   : 1 per notifikasi (pengumuman, dsb.).
- */
+// Hitung Notifikasi Belum Dibaca
 export async function getUnreadNotificationCount(
   caller: AuthenticatedCaller,
 ): Promise<UnreadNotificationCountResult> {
@@ -208,10 +190,7 @@ export async function getUnreadNotificationCount(
   };
 }
 
-/**
- * Menandai satu notifikasi sebagai telah dibaca (`PATCH /api/v1/notifications/{id}/read`).
- * Proteksi Anti-IDOR: Jika bukan milik pemanggil, selalu return 404.
- */
+// Tandai Satu Terbaca
 export async function markNotificationAsRead(
   caller: AuthenticatedCaller,
   notificationId: string,
@@ -245,9 +224,7 @@ export async function markNotificationAsRead(
   return serializeNotificationDoc(notificationId, updatedData);
 }
 
-/**
- * Menandai seluruh notifikasi milik pemanggil sebagai telah dibaca (`PATCH /api/v1/notifications/read-all`).
- */
+// Tandai Semua Terbaca
 export async function markAllNotificationsAsRead(
   caller: AuthenticatedCaller,
 ): Promise<{ markedCount: number }> {
@@ -266,9 +243,6 @@ export async function markAllNotificationsAsRead(
   }
 
   const now = new Date();
-
-  // Chat yang ikut ditandai dibaca harus ikut menggeser receipt percakapan; kalau tidak,
-  // daftar chat masih menampilkan "N belum dibaca" padahal lonceng sudah 0.
   const conversationIds = new Set<string>();
   for (const doc of snapshot.docs) {
     const data = doc.data() ?? {};
@@ -277,8 +251,6 @@ export async function markAllNotificationsAsRead(
     }
   }
 
-  // Firestore membatasi maksimal 500 operasi per batch. Pecah menjadi
-  // chunk 400 agar mark-all tetap berhasil untuk akun dengan notifikasi banyak.
   const CHUNK_SIZE = 400;
   for (let i = 0; i < snapshot.docs.length; i += CHUNK_SIZE) {
     const batch = db.batch();
@@ -307,12 +279,7 @@ export async function markAllNotificationsAsRead(
   return { markedCount: snapshot.docs.length };
 }
 
-/**
- * Menandai semua notifikasi belum dibaca untuk satu target sebagai dibaca
- * (`PATCH /api/v1/notifications/read-by-target`).
- * Dipanggil saat pengguna melakukan aksi langsung, mis. membuka detail laporan,
- * sehingga badge turun tanpa harus membuka lonceng. Hanya menyentuh notifikasi milik caller.
- */
+// Tandai Terbaca Berdasarkan Target
 export async function markNotificationsReadByTarget(
   caller: AuthenticatedCaller,
   input: MarkReadByTargetInput,
@@ -348,9 +315,7 @@ export async function markNotificationsReadByTarget(
   return { markedCount: unread.length };
 }
 
-/**
- * Mengirim notifikasi serentak (broadcast) ke seluruh pelapor atau seluruh pengguna (Hanya Admin).
- */
+// Broadcast Notifikasi Admin
 export async function broadcastNotificationByAdmin(
   caller: AuthenticatedCaller,
   input: BroadcastNotificationInput,
@@ -385,7 +350,6 @@ export async function broadcastNotificationByAdmin(
     createdAt: now,
   };
 
-  // Batasi batch Firestore per 400 operasi (batas aman Firestore adalah 500)
   const CHUNK_SIZE = 400;
   const userDocs = userSnapshots.docs;
 

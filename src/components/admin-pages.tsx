@@ -369,13 +369,13 @@ export function AdminSettingsPage() {
             value={content}
             onChange={(event) => setContent(event.target.value)}
             placeholder={"# Judul bagian\n\nIsi informasi yang sudah diverifikasi."}
-            maxLength={30_000}
+            maxLength={300_000}
             rows={8}
           />
           <p className="help">
             {pdfFile
               ? "Teks PDF diekstrak otomatis (maksimal 300.000 karakter). PDF hasil scan belum didukung tanpa OCR."
-              : "Maksimal 30.000 karakter. Jangan unggah data pribadi pelapor."}
+              : "Maksimal 300.000 karakter. Jangan unggah data pribadi pelapor."}
           </p>
           <button
             className="btn btn-primary"

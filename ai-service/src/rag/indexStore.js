@@ -12,6 +12,7 @@ function readJson(file) {
     }
     return JSON.parse(fs.readFileSync(p, 'utf-8'));
 }
+// Pemuatan Indeks RAG
 export function loadIndex(forceReload = false) {
     if (cached && !forceReload)
         return cached;
@@ -25,7 +26,6 @@ export function loadIndex(forceReload = false) {
         throw new Error(`Artefak "embeddings.f32" tidak ditemukan di ${EXPORT_DIR}.`);
     }
     const buf = fs.readFileSync(embPath);
-    // salin ke ArrayBuffer baru agar byteOffset dijamin kelipatan 4 (syarat Float32Array)
     const embeddings = new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
     if (embeddings.length !== manifest.n * manifest.dim) {
         throw new Error(`embeddings.f32 tidak cocok dengan manifest.json (punya ${embeddings.length} float, ` +

@@ -1,10 +1,4 @@
-/**
- * SISKA — Education Material Domain Service (`EducationService`)
- * Sumber otoritas:
- * - docs/01-SRS.md FR-001 (Public Pages & Edukasi Non-Grafis)
- * - docs/05-BACKEND-ARCHITECTURE.md §2.3 (Domain Services) & §4 (Request Flow)
- * - docs/08-AUTHORIZATION-MATRIX.md (Public Read, Admin Write)
- */
+// Layanan Materi Edukasi
 
 import type { DocumentData, Query } from 'firebase-admin/firestore';
 import {
@@ -46,6 +40,7 @@ function slugify(text: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+// Serialisasi Dokumen Edukasi
 function serializeEducationDoc(
   id: string,
   data: DocumentData,
@@ -84,7 +79,7 @@ function serializeEducationDoc(
   };
 }
 
-// Penyimpanan Gambar Sampul Edukasi
+// Penyimpanan Gambar Sampul
 async function storeEducationCoverImage(
   docId: string,
   coverImage: EducationCoverUploadInput,
@@ -118,20 +113,17 @@ async function storeEducationCoverImage(
       cacheControl: 'public, max-age=86400',
     },
   });
+
   const cfg = resolveAdminConfig();
   const host = cfg.storageHost || '127.0.0.1:9199';
   const coverImageUrl = isFirebaseEmulatorMode()
     ? `http://${host}/v0/b/${cfg.storageBucket}/o/${encodeURIComponent(coverStoragePath)}?alt=media`
     : `https://storage.googleapis.com/${cfg.storageBucket}/${coverStoragePath}`;
+
   return { coverStoragePath, coverImageUrl };
 }
 
-/**
- * Mengambil daftar materi edukasi.
- * - Bersifat publik (tanpa login).
- * - Pengguna non-admin hanya dapat melihat materi dengan `isPublished: true`.
- * - Admin dapat melihat seluruh materi (termasuk draf) bila `includeDrafts` aktif.
- */
+// Daftar Materi Edukasi
 export async function listEducationMaterials(
   query: ListEducationQuery,
   caller?: AuthenticatedCaller | null,
@@ -141,7 +133,6 @@ export async function listEducationMaterials(
 
   let fsQuery: Query = db.collection('education');
 
-  // Filter publikasi: jika bukan admin atau tidak meminta draft, tampilkan hanya yang published
   if (!isAdmin || !query.includeDrafts) {
     fsQuery = fsQuery.where('isPublished', '==', true);
   }
@@ -165,11 +156,9 @@ export async function listEducationMaterials(
     fsQuery = fsQuery.startAfter(cursorSnap);
   }
 
-  // Ambil limit + 1 untuk paginasi cursor
   const snapshot = await fsQuery.limit(query.limit + 1).get();
   let docs = snapshot.docs;
 
-  // Filter pencarian client-side di server (jika ada parameter search)
   if (query.search) {
     const qLower = query.search.toLowerCase();
     docs = docs.filter((doc) => {
@@ -198,10 +187,7 @@ export async function listEducationMaterials(
   };
 }
 
-/**
- * Mengambil detail materi edukasi berdasarkan ID atau Slug.
- * Bersifat publik; materi yang belum dipublikasikan mengembalikan 404 bagi non-admin.
- */
+// Detail Materi Edukasi
 export async function getEducationDetail(
   idOrSlug: string,
   caller?: AuthenticatedCaller | null,
@@ -209,10 +195,8 @@ export async function getEducationDetail(
   const db = getAdminDb();
   const isAdmin = caller?.role === 'admin';
 
-  // 1. Coba cari berdasarkan Document ID
   let docSnap = await db.collection('education').doc(idOrSlug).get();
 
-  // 2. Jika tidak ditemukan, coba cari berdasarkan field slug
   if (!docSnap.exists) {
     const slugQuery = await db
       .collection('education')
@@ -230,7 +214,6 @@ export async function getEducationDetail(
 
   const data = docSnap.data() as EducationDocument;
 
-  // Proteksi materi draf / belum dipublikasikan
   if (!data.isPublished && !isAdmin) {
     throw ApiError.notFound('Materi edukasi tidak ditemukan.');
   }
@@ -238,9 +221,7 @@ export async function getEducationDetail(
   return serializeEducationDoc(docSnap.id, data);
 }
 
-/**
- * Membuat materi edukasi baru (Hanya Admin).
- */
+// Pembuatan Materi Edukasi
 export async function createEducationMaterial(
   caller: AuthenticatedCaller,
   input: CreateEducationInput,
@@ -284,7 +265,6 @@ export async function createEducationMaterial(
   try {
     await docRef.set(docData);
   } catch (err) {
-    // Kompensasi: hapus sampul yatim bila penulisan dokumen gagal.
     if (uploadedCover && input.coverImage) {
       if (resolveActiveStorageProvider() === 'cloudinary') {
         await deleteFromCloudinary({
@@ -314,9 +294,7 @@ export async function createEducationMaterial(
   return serializeEducationDoc(docRef.id, docData);
 }
 
-/**
- * Memperbarui materi edukasi yang sudah ada (Hanya Admin).
- */
+// Pembaruan Materi Edukasi
 export async function updateEducationMaterial(
   caller: AuthenticatedCaller,
   id: string,
@@ -379,9 +357,7 @@ export async function updateEducationMaterial(
   return serializeEducationDoc(id, merged);
 }
 
-/**
- * Menghapus materi edukasi (Hanya Admin).
- */
+// Penghapusan Materi Edukasi
 export async function deleteEducationMaterial(
   caller: AuthenticatedCaller,
   id: string,
@@ -399,7 +375,6 @@ export async function deleteEducationMaterial(
   const existingData = snap.data() as EducationDocument;
   await docRef.delete();
 
-  // Bersihkan gambar sampul (best-effort) agar tidak tertinggal yatim di storage.
   if (existingData.coverStoragePath) {
     if (resolveActiveStorageProvider() === 'cloudinary') {
       await deleteFromCloudinary({

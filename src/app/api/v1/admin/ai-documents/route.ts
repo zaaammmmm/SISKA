@@ -22,11 +22,34 @@ import type { SerializedAiRagDocument } from '@/types/api';
 
 const DOCUMENT_KEYS = ['file', 'cite', 'content'] as const;
 const FILE_NAME_RX = /^[\w .()-]{1,120}\.(?:md|txt|pdf)$/i;
+export const AI_DOCUMENT_MAX_TEXT_CHARS = 300_000;
 
 export const runtime = 'nodejs';
 
+function sanitizeFileName(rawName: string): string {
+  const trimmed = rawName.trim();
+  if (FILE_NAME_RX.test(trimmed)) return trimmed;
+
+  const extMatch = /\.(md|txt|pdf)$/i.exec(trimmed);
+  if (!extMatch) return trimmed;
+
+  const ext = extMatch[1].toLowerCase();
+  const base = trimmed
+    .slice(0, trimmed.length - extMatch[0].length)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w .()-]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/^-+|-+$/g, '')
+    .trim()
+    .slice(0, 120);
+
+  return `${base || 'dokumen'}.${ext}`;
+}
+
 function validateFileName(value: unknown): string {
-  const file = validateRequiredString(value, 'file', { maxLength: 125 });
+  const rawFile = validateRequiredString(value, 'file', { maxLength: 180 });
+  const file = sanitizeFileName(rawFile);
   if (!FILE_NAME_RX.test(file)) {
     throw ApiError.validation(
       'Nama dokumen harus berakhiran .md, .txt, atau .pdf dan tidak boleh berisi folder.',
@@ -67,7 +90,7 @@ export const POST = withAuthenticatedRoute(
       file = validateFileName(body.file);
       cite = validateRequiredString(body.cite, 'cite', { maxLength: 200 });
       content = validateRequiredString(body.content, 'content', {
-        maxLength: 30_000,
+        maxLength: AI_DOCUMENT_MAX_TEXT_CHARS,
       });
     }
 
@@ -83,8 +106,8 @@ export const POST = withAuthenticatedRoute(
       requestId,
     });
 
-    return jsonSuccess(
-      { file, cite, chunkCount: result.addedChunks },
+    return jsonSuccess<SerializedAiRagDocument>(
+      { file, cite, chunkCount: result.addedChunks ?? 0, source: 'web' },
       requestId,
       201,
     );
