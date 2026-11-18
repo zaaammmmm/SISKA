@@ -907,12 +907,8 @@ export function LiveAdminDocumentsPage(){
      <span className="label">Judul sitasi sumber <em className="req">wajib</em></span>
      <input required maxLength={200} value={cite} onChange={e=>setCite(e.target.value)} placeholder="Contoh: Panduan Layanan SISKA"/>
     </label>
-    {!pdfFile&&(
-     <label className="field">
-      <span className="label">Isi dokumen (.md / .txt) <em className="req">wajib untuk dokumen teks</em></span>
-      <textarea className="textarea" rows={7} maxLength={300000} value={content} onChange={e=>setContent(e.target.value)} placeholder={"# Judul Bagian\n\nTulis atau pilih berkas .md / .txt yang berisi informasi resmi terverifikasi."}/>
-      <span className="help">Maksimal 300.000 karakter. Jangan memasukkan kronologi laporan atau data pribadi pengguna.</span>
-     </label>
+    {!pdfFile&&Boolean(content)&&(
+     <p className="help">Berkas teks terpilih: <b>{fileName}</b> ({content.length.toLocaleString("id-ID")} karakter, maks. 300.000). Isinya dibaca otomatis dari berkas. Jangan memasukkan kronologi laporan atau data pribadi pengguna.</p>
     )}
     <div className="actions" style={{marginTop:4}}>
      <button className="btn btn-primary" disabled={!canSubmit}>{saving?"Mengunggah & mengindeks…":"Tambah dan indeks dokumen"}</button>

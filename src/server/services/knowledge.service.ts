@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import type { DocumentData } from 'firebase-admin/firestore';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import {
   deleteFromCloudinary,
   downloadBytesFromCloudinary,
@@ -69,121 +70,163 @@ function serializeKnowledgeDoc(
   };
 }
 
-function unescapePdfLiteral(str: string): string {
-  return str
-    .replace(/\\\(/g, '(')
-    .replace(/\\\)/g, ')')
-    .replace(/\\\\/g, '\\')
-    .replace(/\\n/g, ' ')
-    .replace(/\\r/g, ' ')
-    .replace(/\\t/g, ' ');
+const PDF_MAX_WORDS_PER_CHUNK = 600;
+const PDF_CHUNK_OVERLAP_WORDS = 80;
+
+// Kelompokkan potongan teks pdfjs menjadi baris berdasarkan posisi vertikal.
+function groupPdfTextItemsIntoLines(
+  items: ReadonlyArray<unknown>,
+): string[] {
+  const lines: string[] = [];
+  let current = '';
+  let currentY: number | null = null;
+
+  const flush = () => {
+    const text = current.replace(/\s+/g, ' ').trim();
+    if (text.length > 0) lines.push(text);
+    current = '';
+  };
+
+  for (const raw of items) {
+    const item = raw as {
+      str?: unknown;
+      transform?: unknown;
+      hasEOL?: unknown;
+    };
+    if (typeof item.str !== 'string') continue;
+
+    const y =
+      Array.isArray(item.transform) && typeof item.transform[5] === 'number'
+        ? (item.transform[5] as number)
+        : null;
+
+    if (currentY !== null && y !== null && Math.abs(y - currentY) > 2) {
+      flush();
+    }
+    if (y !== null) currentY = y;
+
+    current += item.str;
+    if (item.hasEOL === true) {
+      flush();
+      currentY = null;
+    }
+  }
+  flush();
+
+  return lines;
 }
 
-// Ekstraksi & Chunking PDF
-export function extractAndChunkPdfBytes(
-  bytes: Uint8Array,
+function chunkPdfPageLines(
+  lineLiterals: string[],
+  pageNumber: number,
   docTitle: string,
 ): ExtractedPdfPageChunk[] {
-  const rawLatin1 = Buffer.from(bytes).toString('latin1');
+  let section: string | null = null;
+  const bodyLines: string[] = [];
+  const normalizedTitle = docTitle.replace(/[^\x20-\x7E]/g, '?').trim();
 
-  if (
-    !rawLatin1.startsWith('%PDF-') ||
-    !rawLatin1.includes('%%EOF') ||
-    !/\/Type\s*\/Page\b/.test(rawLatin1)
-  ) {
-    throw new Error('PDF_PARSE_FAILED');
+  for (const line of lineLiterals) {
+    if (line === docTitle.trim() || line === normalizedTitle) {
+      continue;
+    }
+    const sectionMatch = /^Bagian:\s*(.+)$/i.exec(line);
+    if (sectionMatch && !section) {
+      section = sectionMatch[1].trim();
+      continue;
+    }
+    bodyLines.push(line);
   }
 
-  const streamRegex = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
-  const pageChunks: ExtractedPdfPageChunk[] = [];
-  let match: RegExpExecArray | null;
-  let pageNumber = 0;
+  const fullPageText = (bodyLines.length > 0 ? bodyLines : lineLiterals)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  while ((match = streamRegex.exec(rawLatin1)) !== null) {
-    const streamContent = match[1] ?? '';
-    const lineLiterals: string[] = [];
+  if (fullPageText.length === 0) return [];
 
-    const tjRegex = /\((?:\\.|[^\\()])*\)\s*Tj|\[((?:\\.|[^\]])*)\]\s*TJ/g;
-    let tjMatch: RegExpExecArray | null;
-    while ((tjMatch = tjRegex.exec(streamContent)) !== null) {
-      const fullMatch = tjMatch[0];
-      const innerParenRegex = /\(((?:\\.|[^\\()])*)\)/g;
-      let innerMatch: RegExpExecArray | null;
-      const parts: string[] = [];
-      while ((innerMatch = innerParenRegex.exec(fullMatch)) !== null) {
-        parts.push(unescapePdfLiteral(innerMatch[1] ?? ''));
-      }
-      const joined = parts.join('').trim();
-      if (joined.length > 0) {
-        lineLiterals.push(joined);
-      }
-    }
-
-    if (lineLiterals.length === 0) {
-      continue;
-    }
-
-    pageNumber += 1;
-
-    let section: string | null = null;
-    const bodyLines: string[] = [];
-    const normalizedTitle = docTitle.replace(/[^\x20-\x7E]/g, '?').trim();
-
-    for (const line of lineLiterals) {
-      if (line === docTitle.trim() || line === normalizedTitle) {
-        continue;
-      }
-      const sectionMatch = /^Bagian:\s*(.+)$/i.exec(line);
-      if (sectionMatch && !section) {
-        section = sectionMatch[1].trim();
-        continue;
-      }
-      bodyLines.push(line);
-    }
-
-    const fullPageText = (bodyLines.length > 0 ? bodyLines : lineLiterals)
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (fullPageText.length === 0) {
-      continue;
-    }
-
-    const words = fullPageText.split(/\s+/);
-    const maxWordsPerChunk = 600;
-    const overlapWords = 80;
-
-    if (words.length <= maxWordsPerChunk) {
-      pageChunks.push({
+  const words = fullPageText.split(/\s+/);
+  if (words.length <= PDF_MAX_WORDS_PER_CHUNK) {
+    return [
+      {
         page: pageNumber,
         section: section ?? `Halaman ${pageNumber}`,
         text: fullPageText,
-      });
-    } else {
-      let start = 0;
-      let part = 1;
-      while (start < words.length) {
-        const slice = words.slice(start, start + maxWordsPerChunk).join(' ');
-        pageChunks.push({
-          page: pageNumber,
-          section: section
-            ? `${section} (Bagian ${part})`
-            : `Halaman ${pageNumber} (Bagian ${part})`,
-          text: slice,
-        });
-        if (start + maxWordsPerChunk >= words.length) break;
-        start += maxWordsPerChunk - overlapWords;
-        part += 1;
-      }
-    }
+      },
+    ];
   }
 
-  if (pageChunks.length === 0) {
+  const chunks: ExtractedPdfPageChunk[] = [];
+  let start = 0;
+  let part = 1;
+  while (start < words.length) {
+    const slice = words
+      .slice(start, start + PDF_MAX_WORDS_PER_CHUNK)
+      .join(' ');
+    chunks.push({
+      page: pageNumber,
+      section: section
+        ? `${section} (Bagian ${part})`
+        : `Halaman ${pageNumber} (Bagian ${part})`,
+      text: slice,
+    });
+    if (start + PDF_MAX_WORDS_PER_CHUNK >= words.length) break;
+    start += PDF_MAX_WORDS_PER_CHUNK - PDF_CHUNK_OVERLAP_WORDS;
+    part += 1;
+  }
+  return chunks;
+}
+
+// Ekstraksi & Chunking PDF
+// Memakai pdfjs-dist (sama seperti ekstraktor AI) agar PDF dengan stream
+// terkompresi (FlateDecode), font tertanam, dan object stream dapat dibaca.
+// Nomor halaman mengikuti nomor halaman PDF asli.
+export async function extractAndChunkPdfBytes(
+  bytes: Uint8Array,
+  docTitle: string,
+): Promise<ExtractedPdfPageChunk[]> {
+  const header = Buffer.from(bytes.subarray(0, 1024)).toString('latin1');
+  if (!header.includes('%PDF-')) {
     throw new Error('PDF_PARSE_FAILED');
   }
 
-  return pageChunks;
+  const task = getDocument({
+    data: new Uint8Array(bytes),
+    useSystemFonts: true,
+    isEvalSupported: false,
+  });
+
+  try {
+    const pdf = await task.promise;
+    const pageChunks: ExtractedPdfPageChunk[] = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const textContent = await page.getTextContent();
+      const lines = groupPdfTextItemsIntoLines(textContent.items);
+      pageChunks.push(...chunkPdfPageLines(lines, pageNumber, docTitle));
+    }
+
+    if (pageChunks.length === 0) {
+      // PDF valid, tetapi tidak ada teks (umumnya hasil scan tanpa OCR).
+      throw new Error('PDF_NO_TEXT');
+    }
+
+    return pageChunks;
+  } catch (error) {
+    if (error instanceof Error && error.message === 'PDF_NO_TEXT') {
+      throw error;
+    }
+    console.error('[knowledge] pdfjs gagal membaca PDF:', error);
+    throw new Error('PDF_PARSE_FAILED');
+  } finally {
+    await task.destroy();
+  }
+}
+
+function pdfFailureCode(error: unknown): 'PDF_NO_TEXT' | 'PDF_PARSE_FAILED' {
+  return error instanceof Error && error.message === 'PDF_NO_TEXT'
+    ? 'PDF_NO_TEXT'
+    : 'PDF_PARSE_FAILED';
 }
 
 // Ingest Dokumen KB
@@ -203,7 +246,7 @@ export async function ingestKnowledgeDocumentBytes(params: {
   const now = new Date();
 
   try {
-    const extractedChunks = extractAndChunkPdfBytes(bytes, title);
+    const extractedChunks = await extractAndChunkPdfBytes(bytes, title);
 
     const existingChunksSnap = await db
       .collection('knowledgeChunks')
@@ -244,18 +287,19 @@ export async function ingestKnowledgeDocumentBytes(params: {
       chunkCount: extractedChunks.length,
       errorCode: null,
     };
-  } catch {
+  } catch (error) {
+    const errorCode = pdfFailureCode(error);
     await docRef.update({
       status: 'failed',
       chunkCount: 0,
-      errorCode: 'PDF_PARSE_FAILED',
+      errorCode,
       updatedAt: now,
     });
 
     return {
       status: 'failed',
       chunkCount: 0,
-      errorCode: 'PDF_PARSE_FAILED',
+      errorCode,
     };
   }
 }
@@ -462,6 +506,131 @@ export async function deleteKnowledgeDocument(
   ]);
 }
 
+// Penyimpanan berkas PDF Knowledge Base (Cloudinary atau Firebase Storage)
+async function saveKnowledgePdfObject(
+  storagePath: string,
+  bytes: Uint8Array,
+  fileName: string,
+): Promise<void> {
+  if (resolveActiveStorageProvider() === 'cloudinary') {
+    await uploadBytesToCloudinary({
+      storagePath,
+      bytes,
+      contentType: 'application/pdf',
+      fileName,
+      deliveryType: 'private',
+    });
+    return;
+  }
+  await getAdminBucket()
+    .file(storagePath)
+    .save(Buffer.from(bytes), {
+      resumable: false,
+      contentType: 'application/pdf',
+      metadata: { cacheControl: 'private, no-store' },
+    });
+}
+
+async function deleteKnowledgePdfObject(storagePath: string): Promise<void> {
+  if (!storagePath) return;
+  if (resolveActiveStorageProvider() === 'cloudinary') {
+    await deleteFromCloudinary({
+      storagePath,
+      contentType: 'application/pdf',
+      deliveryType: 'private',
+    }).catch(() => undefined);
+    return;
+  }
+  await getAdminBucket()
+    .file(storagePath)
+    .delete({ ignoreNotFound: true })
+    .catch(() => undefined);
+}
+
+// Hapus catatan Knowledge Base (dokumen, chunk, dan berkas PDF) berdasarkan ragFile
+async function removeKnowledgeRecordsByRagFile(file: string): Promise<number> {
+  const db = getAdminDb();
+  const existing = await db
+    .collection('knowledgeDocuments')
+    .where('ragFile', '==', file)
+    .get();
+
+  for (const docSnap of existing.docs) {
+    const data = docSnap.data() as KnowledgeDocument;
+    const chunksSnap = await db
+      .collection('knowledgeChunks')
+      .where('documentId', '==', docSnap.id)
+      .get();
+
+    const batch = db.batch();
+    for (const chunkDoc of chunksSnap.docs) {
+      batch.delete(chunkDoc.ref);
+    }
+    batch.delete(docSnap.ref);
+    await batch.commit();
+
+    await deleteKnowledgePdfObject(data.storagePath);
+  }
+  return existing.docs.length;
+}
+
+// Catat PDF dari halaman "Dokumen SISKA AI" ke Firestore (knowledgeDocuments)
+// setelah AI Service berhasil mengindeksnya. Berkas PDF asli disimpan di storage.
+export async function registerAiRagPdfInKnowledgeBase(params: {
+  caller: AuthenticatedCaller;
+  file: string;
+  title: string;
+  bytes: Uint8Array;
+  chunkCount: number;
+}): Promise<SerializedKnowledgeDocument> {
+  const adminCaller = requireAdmin(params.caller);
+  const db = getAdminDb();
+
+  // Bila ada catatan lama untuk berkas yang sama (mis. sisa dari proses yang tidak tuntas), bersihkan dulu.
+  await removeKnowledgeRecordsByRagFile(params.file);
+
+  const docRef = db.collection('knowledgeDocuments').doc();
+  const version = 1;
+  const storagePath = `knowledge-base/${docRef.id}/v${version}.pdf`;
+  const now = new Date();
+
+  await saveKnowledgePdfObject(storagePath, params.bytes, params.file);
+
+  const doc: KnowledgeDocument = {
+    title: params.title,
+    sourceUrl: null,
+    storagePath,
+    sha256: createHash('sha256').update(params.bytes).digest('hex'),
+    uploadedBy: adminCaller.uid,
+    status: 'indexed',
+    chunkCount: params.chunkCount,
+    version,
+    errorCode: null,
+    ragFile: params.file,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  try {
+    await docRef.create(doc);
+  } catch (err) {
+    await deleteKnowledgePdfObject(storagePath);
+    throw ApiError.internal(
+      err instanceof Error ? err.message : 'KB document commit failed',
+      'Gagal menyimpan metadata dokumen Knowledge Base.',
+    );
+  }
+
+  return serializeKnowledgeDoc(docRef.id, doc);
+}
+
+// Hapus catatan Firestore + berkas PDF untuk dokumen yang dihapus dari halaman "Dokumen SISKA AI"
+export async function removeAiRagDocumentFromKnowledgeBase(
+  file: string,
+): Promise<number> {
+  return removeKnowledgeRecordsByRagFile(file);
+}
+
 // Reindex Dokumen KB
 export async function requestKnowledgeReindex(
   caller: AuthenticatedCaller,
@@ -524,11 +693,15 @@ export async function requestKnowledgeReindex(
       } else {
         failedCount += 1;
       }
-    } catch {
+    } catch (error) {
+      console.error(
+        `[knowledge] reindex gagal untuk dokumen ${docSnap.id}:`,
+        error,
+      );
       await docSnap.ref.update({
         status: 'failed',
         chunkCount: 0,
-        errorCode: 'PDF_PARSE_FAILED',
+        errorCode: pdfFailureCode(error),
         updatedAt: new Date(),
       });
       failedCount += 1;
