@@ -2,7 +2,7 @@
 import { useEffect } from "react";
 import { X } from "lucide-react";
 
-const SAFE_URL = "https://www.google.com/";
+const SAFE_URL = "/";
 
 /** Keluar dari situs seketika, tanpa meninggalkan halaman ini di riwayat tombol "kembali". */
 function leave() {

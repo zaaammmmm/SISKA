@@ -1,6 +1,10 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { TriangleAlert } from "lucide-react";
 import { PublicFooter, PublicHeader } from "@/components/public-chrome";
+import { auth } from "@/lib/firebase";
 
 const facts = [
   "Hanya kategori dan kronologi yang wajib diisi",
@@ -23,6 +27,17 @@ const statuses = [
 ];
 
 export default function Home() {
+  const router = useRouter();
+
+  const handleCreateReport = () => {
+    if (!auth?.currentUser) {
+      router.push("/login?status=login-required");
+      return;
+    }
+
+    router.push("/user/new-report");
+  };
+
   return (
     <>
       <PublicHeader active="home" />
@@ -35,7 +50,7 @@ export default function Home() {
                 Sampaikan laporan, pahami pilihan layanan, dan cari dukungan. Kamu tidak perlu menceritakan lebih dari yang siap kamu bagikan.
               </p>
               <div className="hero-actions">
-                <Link href="/user/new-report" className="btn btn-primary">Buat laporan</Link>
+                <button type="button" className="btn btn-primary" onClick={handleCreateReport}>Buat laporan</button>
                 <Link href="/education" className="btn btn-outline">Baca dulu</Link>
               </div>
               <ul className="hero-facts">
@@ -76,7 +91,7 @@ export default function Home() {
             <article className="tile tile-dark w7">
               <h3>Melapor dengan caramu</h3>
               <p>Tulis laporan lewat formulir yang jelas. Kamu menentukan seberapa banyak yang ingin dibagikan; bukti pendukung boleh ditambahkan nanti.</p>
-              <Link href="/user/new-report" className="btn btn-primary">Buat laporan</Link>
+              <button type="button" className="btn btn-primary" onClick={handleCreateReport}>Buat laporan</button>
             </article>
             <article className="tile w5">
               <h3>Bertanya dulu</h3>

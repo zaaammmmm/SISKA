@@ -1,10 +1,11 @@
 # Catatan redesign UI SISKA
 
-## Sistem desain baru ("ruang tenang")
-- Font: Literata (judul, serif untuk suara yang manusiawi) + Atkinson Hyperlegible (UI, dirancang agar huruf mudah dibedakan). Keduanya via `next/font/google`.
-- Warna: kertas abu-kehijauan `#F2F4F1`, tinta `#16292C`, aksi teal `#07686B` (warna logo `#0A7F82` tetap jadi identitas), teal gelap `#07484B`. Status laporan: ochre, biru-slate, teal, hijau, plum (tidak ada merah alarm).
-- Ukuran teks minimum 13–14px (sebelumnya 8.5–12px). Semua pasangan warna lolos kontras AA. axe-core: 0 pelanggaran di 19 halaman.
-- Tidak ada gradasi, bayangan kartu, blur kaca, hover yang mengangkat elemen, eyebrow kapital, atau penomoran dekoratif.
+## Sistem desain (v3)
+- Font: Poppins (400/500/600/700) lewat `next/font/google`, untuk judul dan isi.
+- Warna: latar netral dingin `#F4F7F7`, teal tegas `#0B6E71` (turunan warna logo), panel gelap `#0B3B3E`. Status laporan: ochre, biru, teal, hijau, plum (tanpa merah alarm).
+- Bentuk: permukaan putih membulat (radius 18/28), elevasi halus satu tingkat, tombol dan chip membulat, tile ringkasan, komposisi bento di beranda.
+- Ukuran teks minimum 13px. Kontras AA. axe-core: 0 pelanggaran di 19 halaman.
+- Tidak ada gradasi, blur kaca, atau gerak dekoratif.
 
 ## Tambahan yang perlu kamu putuskan
 1. **Keluar cepat** (`components/quick-exit.tsx`): tombol + Esc ×3 membuka google.com via `location.replace`. Tampil di halaman publik, auth, dan ruang pengguna. Ganti `SAFE_URL` atau hapus bila tidak diinginkan.

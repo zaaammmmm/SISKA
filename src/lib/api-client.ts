@@ -7,6 +7,8 @@
  */
 
 import { auth } from '@/lib/firebase/client';
+import { emitNotificationsChanged } from '@/lib/notification-events';
+import { withBasePath } from '@/lib/base-path';
 import type {
   AiChatResponse,
   ApiErrorBody,
@@ -108,18 +110,18 @@ interface RequestOptions {
 
 export function buildApiUrl(path: string, origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'): URL {
   const rawPath = (path ?? '').trim();
-  const normalizedBase = '/api/v1';
+  const normalizedBase = withBasePath('/api/v1');
 
   if (!rawPath || rawPath === '/') {
     return new URL(normalizedBase, origin);
   }
 
   const candidate = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
-  if (candidate === normalizedBase || candidate.startsWith(`${normalizedBase}/`)) {
-    return new URL(candidate, origin);
-  }
+  const apiCandidate = candidate === '/api/v1' || candidate.startsWith('/api/v1/')
+    ? candidate
+    : `${'/api/v1'}${candidate}`;
 
-  return new URL(`${normalizedBase}${candidate}`, origin);
+  return new URL(withBasePath(apiCandidate), origin);
 }
 
 async function apiRequest<TResponse>(
@@ -398,11 +400,13 @@ export async function updateConversationStatusByAdmin(
 
 export async function markConversationAsRead(
   conversationId: string,
-): Promise<{ conversationId: string; readAt: string }> {
-  return apiRequest<{ conversationId: string; readAt: string }>(
+): Promise<{ conversationId: string; readAt: string; previousReadAt: string | null }> {
+  const result = await apiRequest<{ conversationId: string; readAt: string; previousReadAt: string | null }>(
     `/conversations/${encodeURIComponent(conversationId)}/read`,
     { method: 'POST' },
   );
+  emitNotificationsChanged();
+  return result;
 }
 
 export async function fetchConversationMessages(
@@ -582,8 +586,8 @@ export interface BackendHealthStatus {
 export async function fetchBackendHealth(): Promise<BackendHealthStatus> {
   const url =
     typeof window !== 'undefined'
-      ? `${window.location.origin}/api/v1/health`
-      : 'http://localhost:3000/api/v1/health';
+      ? new URL(withBasePath('/api/v1/health'), window.location.origin).toString()
+      : new URL(withBasePath('/api/v1/health'), 'http://localhost:3000').toString();
   const response = await fetch(url, { method: 'GET', cache: 'no-store' });
   const json = (await response.json()) as BackendHealthStatus;
   return json;
@@ -711,20 +715,40 @@ export async function fetchUnreadNotificationCount(): Promise<UnreadNotification
 export async function markNotificationAsRead(
   id: string,
 ): Promise<SerializedNotificationItem> {
-  return apiRequest<SerializedNotificationItem>(
+  const result = await apiRequest<SerializedNotificationItem>(
     `/api/v1/notifications/${encodeURIComponent(id)}/read`,
     {
       method: 'PATCH',
     },
   );
+  emitNotificationsChanged();
+  return result;
 }
 
 export async function markAllNotificationsAsRead(): Promise<{
   markedCount: number;
 }> {
-  return apiRequest<{ markedCount: number }>('/api/v1/notifications/read-all', {
+  const result = await apiRequest<{ markedCount: number }>('/api/v1/notifications/read-all', {
     method: 'PATCH',
   });
+  emitNotificationsChanged();
+  return result;
+}
+
+/**
+ * Tandai notifikasi sebuah target (laporan/edukasi) sebagai dibaca ketika pengguna
+ * benar-benar membukanya. Gagal secara senyap: badge hanya penanda, bukan fungsi inti.
+ */
+export async function markNotificationsReadByTarget(
+  targetType: 'report' | 'education',
+  targetId: string,
+): Promise<{ markedCount: number }> {
+  const result = await apiRequest<{ markedCount: number }>(
+    '/api/v1/notifications/read-by-target',
+    { method: 'PATCH', body: { targetType, targetId } },
+  );
+  if (result.markedCount > 0) emitNotificationsChanged();
+  return result;
 }
 
 export async function broadcastNotificationByAdmin(input: {
@@ -790,6 +814,7 @@ export const siskaApi = {
     unreadCount: fetchUnreadNotificationCount,
     markRead: markNotificationAsRead,
     markAllRead: markAllNotificationsAsRead,
+    markReadByTarget: markNotificationsReadByTarget,
     broadcast: broadcastNotificationByAdmin,
   },
   ai: {

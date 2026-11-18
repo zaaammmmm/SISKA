@@ -221,8 +221,11 @@ test('REP-01 & REP-02: Validasi pembuatan laporan menolak injeksi reporterId/sta
     description: 'Deskripsi kejadian untuk pengujian.',
   });
   const created = await createReport(CALLER_REPORTER_A, validInput, 'req_rep_01');
+  const now = new Date();
+  const expectedPrefix = `SK-${String(now.getFullYear() % 100).padStart(2, '0')}${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   assert.equal(created.reporterId, UID.reporterA);
   assert.equal(created.status, 'submitted');
+  assert.match(created.id, new RegExp(`^${expectedPrefix}[0-9]{2}$`));
 
   // Pastikan statusHistory awal (null -> submitted) dan auditEvents tercatat
   const detail = await getReportDetail(CALLER_REPORTER_A, created.id);

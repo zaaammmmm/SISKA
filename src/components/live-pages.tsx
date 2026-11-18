@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, onSnapshot, orderBy, query, where, type Unsubscribe } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
-import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, updateProfile } from "firebase/auth";
+import { EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, updatePassword, updateProfile } from "firebase/auth";
 import { auth, db } from "@/lib/firebase/client";
+import { withBasePath } from "@/lib/base-path";
 import { AppShell } from "@/components/shell";
 import { AiChatPanel } from "@/components/ai-chat";
 import {
@@ -15,8 +16,9 @@ import {
   updateConversationStatusByAdmin, fetchMyProfile, updateMyProfileName, updateMyProfileWithAvatar,
   fetchAiRagDocumentsByAdmin, addAiRagDocumentByAdmin, uploadAiRagPdfByAdmin, deleteAiRagDocumentByAdmin,
   fetchKnowledgeDocumentsByAdmin, uploadKnowledgePdfByAdmin, deleteKnowledgeDocumentByAdmin, triggerKnowledgeReindexByAdmin, fetchAuditEventsByAdmin,
-  broadcastNotificationByAdmin,
+  broadcastNotificationByAdmin, markConversationAsRead, markNotificationsReadByTarget, fetchConversations,
 } from "@/lib/api-client";
+import { useUnreadSummary } from "@/lib/use-unread-summary";
 import type { SerializedReport, SerializedReportDetail, SerializedConversation, SerializedMessage, ReportsSummaryResult, SerializedAiRagDocument, SerializedKnowledgeDocument, SerializedAuditEvent, SignedDownloadUrlResult } from "@/types/api";
 import { ALLOWED_STATUS_TRANSITIONS, isStatusNoteRequired, type ReportStatus } from "@/types/domain";
 
@@ -108,12 +110,23 @@ export function LiveNewReportPage() {
   const router = useRouter();
   const [category,setCategory]=useState(""); const [incidentAt,setIncidentAt]=useState(""); const [location,setLocation]=useState(""); const [description,setDescription]=useState("");
   const [files,setFiles]=useState<File[]>([]); const [busy,setBusy]=useState(false); const [error,setError]=useState(""); const [createdId,setCreatedId]=useState("");
+
+  useEffect(() => {
+    if (!auth) return;
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        router.replace("/login?status=login-required");
+      }
+    });
+    return () => unsubscribe();
+  }, [router]);
+
   async function submit(e: React.FormEvent) { e.preventDefault(); setBusy(true); setError(""); try { const report=await submitNewReport({category,incidentAt:incidentAt?new Date(incidentAt).toISOString():null,location:location.trim()||null,description}); setCreatedId(report.id); for (const file of files) await uploadEvidenceMultipart(report.id,file); router.push(`/user/reports/${encodeURIComponent(report.id)}`); } catch(e) { setError(errorText(e)); } finally { setBusy(false); } }
   function addFiles(list: FileList|null) { if(!list)return; const accepted=Array.from(list); const invalid=accepted.find(f=>!(["application/pdf","image/jpeg","image/png"].includes(f.type))||f.size>5*1024*1024); if(invalid){setError(`${invalid.name}: format harus PDF/JPG/PNG dan ukuran maksimal 5 MiB.`);return;} setFiles(old=>[...old,...accepted]); }
   return (
     <AppShell role="user">
       <Head title="Buat laporan" subtitle="Tulis seperlunya. Kamu bisa menambahkan bukti nanti lewat halaman detail laporan."/>
-      <form className="card" onSubmit={submit} style={{maxWidth:820}}>
+      <form className="card" onSubmit={submit} style={{ width: "100%" }}>
         <div className="note" role="note">
           <div>
             <b>Hanya dua isian yang wajib: kategori dan apa yang terjadi.</b>
@@ -193,6 +206,9 @@ function Detail({id,admin}:{id:string;admin:boolean}) {
  const [report,setReport]=useState<SerializedReportDetail|null>(null);const [error,setError]=useState("");const [busy,setBusy]=useState(false);const [uploadBusy,setUploadBusy]=useState(false);const [next,setNext]=useState<ReportStatus>("under_review");const [note,setNote]=useState("");
  const [previews,setPreviews]=useState<Record<string,SignedDownloadUrlResult&{revealed?:boolean}>>({});
  const load=useCallback(async()=>{try{setError("");const r=await fetchReportDetail(id);setReport(r);setNext(r.status==="submitted"?"under_review":r.status==="under_review"?"in_progress":"resolved");}catch(e){setError(errorText(e));}},[id]);useEffect(()=>{void load();},[load]);
+ // Membuka detail laporan = membaca pembaruannya. Badge sidebar/lonceng turun tanpa menunggu klik lonceng.
+ const reportStatus=report?.status;
+ useEffect(()=>{if(!reportStatus)return;void markNotificationsReadByTarget("report",id).catch(()=>undefined);},[id,reportStatus]);
  async function update(e:React.FormEvent){e.preventDefault();if(!report)return;setBusy(true);setError("");try{await transitionReportStatusByAdmin(id,{status:next,note:note.trim()||undefined});await load();setNote("");}catch(e){setError(errorText(e));}finally{setBusy(false);}}
  async function download(evidenceId:string){try{const {url}=await fetchEvidenceSignedDownloadUrl(id,evidenceId);window.open(url,"_blank","noopener,noreferrer");}catch(e){setError(errorText(e));}}
  async function previewPhoto(evidenceId:string){try{setError("");const res=await fetchEvidenceSignedDownloadUrl(id,evidenceId);setPreviews(old=>({...old,[evidenceId]:{...res,revealed:false}}));}catch(e){setError(errorText(e));}}
@@ -294,6 +310,8 @@ function ConversationChat({admin}:{admin:boolean}) {
  const [conversations,setConversations]=useState<SerializedConversation[]>([]);
  const [active,setActive]=useState("");
  const [messages,setMessages]=useState<SerializedMessage[]>([]);
+ // Percakapan pemilik `messages` saat ini. Mencegah pesan percakapan lama dianggap milik percakapan baru.
+ const [messagesConv,setMessagesConv]=useState("");
  const [reporterNames,setReporterNames]=useState<Record<string,string>>({});
  const [currentUid,setCurrentUid]=useState("");
  const [text,setText]=useState("");
@@ -412,15 +430,15 @@ function ConversationChat({admin}:{admin:boolean}) {
 
  // Pesan percakapan aktif: Firestore snapshot menjadi satu-satunya sumber state pesan.
  useEffect(()=>{
-  if(!db||!active){setMessages([]);return;}
-  setMessages([]);
+  if(!db||!active){setMessages([]);setMessagesConv("");return;}
+  setMessages([]);setMessagesConv("");
   const messagesQuery=query(collection(db,"conversations",active,"messages"),orderBy("createdAt","asc"));
   const unsubscribe=onSnapshot(messagesQuery,snapshot=>{
    const items=snapshot.docs.map(item=>{
     const data=item.data();
     return {id:item.id,senderUid:String(data.senderUid??""),body:String(data.body??""),createdAt:firestoreDate(data.createdAt),attachmentPath:typeof data.attachmentPath==="string"?data.attachmentPath:null,readByRecipient:data.readByRecipient===true};
    });
-   setMessages(items);
+   setMessages(items);setMessagesConv(active);
   },listenerError=>{
    if(!auth?.currentUser)return;
    console.error(`[SISKA CHAT] Messages listener (${active}):`,listenerError);
@@ -433,6 +451,141 @@ function ConversationChat({admin}:{admin:boolean}) {
    stop();
   };
  },[active]);
+
+ // ===== Status baca =====
+ // 1) Membuka percakapan, 2) pesan masuk saat percakapan terbuka, 3) kembali ke tab ini
+ // => semuanya menandai percakapan dibaca di server (receipt + notifikasi), lalu badge disegarkan.
+ const lastMarkedRef=useRef("");
+ // Batas pesan lama/baru: dihitung dari waktu baca SEBELUM percakapan dibuka (dikirim server),
+ // lalu dibekukan selama percakapan terbuka agar pembatas tidak bergeser saat pesan baru masuk.
+ const pendingBoundaryRef=useRef("");
+ const [readBoundary,setReadBoundary]=useState<{conversationId:string;prevMs:number;openMs:number}|null>(null);
+ // Jumlah pesan belum dibaca per percakapan (id -> jumlah pesan dari lawan bicara).
+ const [unreadByConversation,setUnreadByConversation]=useState<Record<string,number>>({});
+ const unreadSummary=useUnreadSummary();
+
+ const markActiveAsRead=useCallback((force=false)=>{
+  if(!active||typeof document==="undefined"||document.visibilityState!=="visible")return;
+  const last=messages[messages.length-1];
+  const key=`${active}:${last?.id??""}`;
+  if(!force&&lastMarkedRef.current===key)return;
+  lastMarkedRef.current=key;
+  setUnreadByConversation(old=>{if(!old[active])return old;const next={...old};delete next[active];return next;});
+  // Hanya panggilan pertama sejak percakapan dibuka yang menentukan batas pesan belum terbaca.
+  const captureFor=pendingBoundaryRef.current===active?active:"";
+  if(captureFor)pendingBoundaryRef.current="";
+  void markConversationAsRead(active).then(result=>{
+   if(!captureFor)return;
+   setReadBoundary({
+    conversationId:captureFor,
+    prevMs:result.previousReadAt?new Date(result.previousReadAt).getTime():0,
+    openMs:new Date(result.readAt).getTime(),
+   });
+  }).catch(()=>{lastMarkedRef.current="";if(captureFor)pendingBoundaryRef.current=captureFor;});
+ },[active,messages]);
+
+ // Saat percakapan dibuka atau berpindah.
+ useEffect(()=>{
+  lastMarkedRef.current="";
+  pendingBoundaryRef.current=active;
+  setReadBoundary(null);
+  markActiveAsRead(true);
+ },[active]); // eslint-disable-line react-hooks/exhaustive-deps
+ // Saat ada pesan masuk dari lawan bicara ketika percakapan sedang terbuka (dibaca langsung).
+ useEffect(()=>{
+  const last=messages[messages.length-1];
+  if(!last||!currentUid||last.senderUid===currentUid)return;
+  markActiveAsRead();
+ },[messages,currentUid,markActiveAsRead]);
+ // Saat pengguna kembali ke tab/jendela ini.
+ useEffect(()=>{
+  const onVisible=()=>markActiveAsRead(true);
+  document.addEventListener("visibilitychange",onVisible);
+  window.addEventListener("focus",onVisible);
+  return()=>{document.removeEventListener("visibilitychange",onVisible);window.removeEventListener("focus",onVisible);};
+ },[markActiveAsRead]);
+
+ // Jumlah pesan belum dibaca per percakapan, supaya admin tahu tiap pengguna mengirim berapa pesan.
+ // Sumber kebenarannya server (receipt baca per UID). Disegarkan saat ada pesan baru di daftar
+ // percakapan (listener Firestore), saat badge global berubah, dan saat berpindah percakapan.
+ const conversationsSignature=useMemo(()=>conversations.map(item=>`${item.id}:${item.lastMessageAt??item.updatedAt}`).join("|"),[conversations]);
+ useEffect(()=>{
+  if(!currentUid)return;
+  let cancelled=false;
+  const timer=setTimeout(()=>{
+   fetchConversations().then(result=>{
+    if(cancelled)return;
+    const next:Record<string,number>={};
+    for(const item of result.items){
+     // Percakapan yang sedang dibuka sedang/sudah ditandai dibaca; jangan tampilkan angka untuknya.
+     if(item.id!==active&&(item.unreadCount??0)>0)next[item.id]=item.unreadCount;
+    }
+    setUnreadByConversation(next);
+   }).catch(()=>undefined);
+  },250); // gabungkan pesan beruntun menjadi satu request
+  return()=>{cancelled=true;clearTimeout(timer);};
+ },[conversationsSignature,unreadSummary.chats,active,currentUid]);
+
+
+ // ===== Pembatas "N pesan belum terbaca" =====
+ // Pesan lawan bicara yang dikirim setelah terakhir kali percakapan dibaca, sampai saat dibuka.
+ const unreadMarker=useMemo(()=>{
+  if(!readBoundary||readBoundary.conversationId!==active||messagesConv!==active)return null;
+  const unread=messages.filter(message=>{
+   if(message.senderUid===currentUid)return false;
+   const at=new Date(message.createdAt).getTime();
+   return at>readBoundary.prevMs&&at<=readBoundary.openMs;
+  });
+  return unread.length?{firstId:unread[0].id,count:unread.length}:null;
+ },[readBoundary,active,messagesConv,messages,currentUid]);
+
+ // ===== Auto-scroll ke pesan terbaru =====
+ const bodyRef=useRef<HTMLDivElement>(null);
+ const stickRef=useRef(true);          // pengguna sedang berada di dasar chat
+ const scrolledForRef=useRef("");      // percakapan yang sudah di-scroll ke dasar saat dibuka
+ const lastSeenMessageRef=useRef("");
+ const [newBelow,setNewBelow]=useState(0);
+
+ const scrollToBottom=useCallback((smooth=false)=>{
+  const el=bodyRef.current;
+  if(!el)return;
+  el.scrollTo({top:el.scrollHeight,behavior:smooth?"smooth":"auto"});
+  stickRef.current=true;
+  setNewBelow(0);
+ },[]);
+
+ const onBodyScroll=useCallback(()=>{
+  const el=bodyRef.current;
+  if(!el)return;
+  const nearBottom=el.scrollHeight-el.scrollTop-el.clientHeight<120;
+  stickRef.current=nearBottom;
+  if(nearBottom)setNewBelow(count=>count?0:count);
+ },[]);
+
+ // Pindah percakapan: kembali ke mode "ikuti pesan terbaru".
+ useEffect(()=>{stickRef.current=true;setNewBelow(0);lastSeenMessageRef.current="";scrolledForRef.current="";},[active]);
+
+ useEffect(()=>{
+  if(!active||messagesConv!==active||!messages.length)return;
+  const last=messages[messages.length-1];
+  if(scrolledForRef.current!==active){
+   // Pertama kali pesan percakapan ini tampil: langsung ke dasar tanpa animasi.
+   scrolledForRef.current=active;
+   lastSeenMessageRef.current=last.id;
+   requestAnimationFrame(()=>scrollToBottom(false));
+   return;
+  }
+  if(last.id===lastSeenMessageRef.current)return;
+  lastSeenMessageRef.current=last.id;
+  // Pesan sendiri atau pengguna sedang di dasar: ikuti. Kalau sedang membaca pesan lama: jangan loncat.
+  if(last.senderUid===currentUid||stickRef.current)requestAnimationFrame(()=>scrollToBottom(true));
+  else setNewBelow(count=>count+1);
+ },[messages,messagesConv,active,currentUid,scrollToBottom]);
+
+ // Pembatas muncul setelah respons server dan menambah tinggi konten di atas; jaga posisi tetap di dasar.
+ useEffect(()=>{
+  if(unreadMarker&&stickRef.current)requestAnimationFrame(()=>scrollToBottom(false));
+ },[unreadMarker?.firstId,scrollToBottom]); // eslint-disable-line react-hooks/exhaustive-deps
 
  const current=conversations.find(item=>item.id===active);
  const reporterName=current?(reporterNames[current.reporterId]||(admin?"Memuat nama…":"Anda")):"";
@@ -490,8 +643,9 @@ function ConversationChat({admin}:{admin:boolean}) {
     {conversations.map(conversation=>{
      const name=admin?(reporterNames[conversation.reporterId]||"Pengguna SISKA"):"Chat dengan Admin";
      const preview=conversation.lastMessage||"Buka untuk melihat pesan";
+     const unread=active===conversation.id?0:(unreadByConversation[conversation.id]??0);
      return <button key={conversation.id} className={`conv ${active===conversation.id?"active":""}`} aria-current={active===conversation.id?"true":undefined} onClick={()=>setActive(conversation.id)}>
-      <b>{name}</b><small>{preview.length>64?`${preview.slice(0,61)}…`:preview}</small><small>{conversation.status==="open"?"Terbuka":"Ditutup"}, {dateText(conversation.lastMessageAt||conversation.updatedAt)}</small>
+      <span className="conv-row"><b className={unread?"unread":undefined}>{name}</b>{unread>0&&<span className="conv-count" aria-label={`${unread} pesan belum dibaca`}>{unread>99?"99+":unread}</span>}</span><small>{preview.length>64?`${preview.slice(0,61)}…`:preview}</small><small>{conversation.status==="open"?"Terbuka":"Ditutup"}, {dateText(conversation.lastMessageAt||conversation.updatedAt)}</small>
      </button>;
     })}
     {!loading&&!conversations.length&&<p className="help">{admin?"Belum ada percakapan masuk.":"Belum ada percakapan. Pilih Percakapan baru untuk menulis ke petugas."}</p>}
@@ -501,14 +655,18 @@ function ConversationChat({admin}:{admin:boolean}) {
     <div className="chat-head"><b>{current?(admin?reporterName:"Chat dengan Admin"):"Percakapan SISKA"}</b><div className="row">
      {admin&&current&&<button className="btn btn-outline btn-sm" disabled={statusBusy} onClick={()=>void toggleStatus()}>{current.status==="open"?"Tutup percakapan":"Buka kembali"}</button>}
     </div></div>
-    <div className="chat-body" role="log" aria-live="polite" aria-label="Pesan">
+    <div className="chat-body" role="log" aria-live="polite" aria-label="Pesan" ref={bodyRef} onScroll={onBodyScroll}>
      {messages.map(message=>{
       const isReporter=message.senderUid===current?.reporterId;
       const isMine=message.senderUid===currentUid;
       const author=isReporter?(admin?reporterName:"Anda"):"Admin SISKA";
-      return <div key={message.id} className={`bubble ${isMine?"me":"them"}`}><div className="who">{author}<span>{dateText(message.createdAt)}</span></div><div>{message.body}</div>{message.attachmentPath&&<div style={{marginTop:8}}><button type="button" className="btn btn-outline btn-sm" onClick={()=>void openMessageAttachment(message.id)}>Lihat / Unduh Lampiran</button></div>}</div>;
+      return <Fragment key={message.id}>
+       {unreadMarker?.firstId===message.id&&<div className="unread-divider" role="separator" aria-label={`${unreadMarker.count} pesan belum terbaca`}><span>{unreadMarker.count} pesan belum terbaca</span></div>}
+       <div className={`bubble ${isMine?"me":"them"}`}><div className="who">{author}<span>{dateText(message.createdAt)}</span></div><div>{message.body}</div>{message.attachmentPath&&<div style={{marginTop:8}}><button type="button" className="btn btn-outline btn-sm" onClick={()=>void openMessageAttachment(message.id)}>Lihat / Unduh Lampiran</button></div>}</div>
+      </Fragment>;
      })}
      {!messages.length&&<p className="help">{current?"Belum ada pesan. Mulai percakapan dengan mengirim pesan.":"Pilih percakapan untuk melihat pesan."}</p>}
+     {newBelow>0&&<button type="button" className="jump-latest" onClick={()=>scrollToBottom(true)}>↓ {newBelow} pesan baru</button>}
     </div>
     <form className="compose" onSubmit={send}>
      {chatFile&&<div className="row" style={{marginBottom:8,fontSize:12}}><span>Lampiran: <b>{chatFile.name}</b> ({(chatFile.size/1024).toFixed(0)} KB)</span><button type="button" className="link-teal" onClick={()=>setChatFile(null)}>Hapus</button></div>}
@@ -818,5 +976,5 @@ export function LiveProfilePage(){
  useEffect(()=>{fetchMyProfile().then(p=>{setName(p.displayName);setEmail(p.email);setRole(p.role);setPhotoUrl(p.photoUrl??null);}).catch(e=>setError(errorText(e)));},[]);
  async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");setMessage("");try{const p=await updateMyProfileWithAvatar({displayName:name.trim(),avatarFile});if(auth?.currentUser) await updateProfile(auth.currentUser,{displayName:p.displayName,...(p.photoUrl?{photoURL:p.photoUrl}:{})});setName(p.displayName);if(p.photoUrl)setPhotoUrl(p.photoUrl);setAvatarFile(null);setMessage(avatarFile?"Profil dan foto berhasil diperbarui.":"Nama profil berhasil diperbarui.");}catch(e){setError(errorText(e));}finally{setBusy(false);}}
  async function changePassword(e:React.FormEvent){e.preventDefault();setError("");setMessage("");if(newPassword.length<6){setError("Password baru minimal 6 karakter.");return;}if(newPassword!==confirmPassword){setError("Konfirmasi password tidak sama.");return;}const user=auth?.currentUser;if(!user?.email){setError("Sesi akun tidak ditemukan. Silakan login ulang.");return;}setBusy(true);try{await reauthenticateWithCredential(user,EmailAuthProvider.credential(user.email,currentPassword));await updatePassword(user,newPassword);setCurrentPassword("");setNewPassword("");setConfirmPassword("");setMessage("Password berhasil diperbarui.");}catch(e){setError((e as {code?:string})?.code==="auth/wrong-password"?"Password saat ini tidak sesuai.":"Password belum dapat diperbarui. Silakan login ulang jika sesi kedaluwarsa.");}finally{setBusy(false);}}
- return <AppShell role="user"><Head title="Profil dan pengaturan" subtitle="Informasi akun yang tersimpan di SISKA."/><div className="stack" style={{maxWidth:640}}><form className="card stack" onSubmit={save}><h2 className="card-title" style={{marginBottom:0}}>Informasi akun</h2><div className="row" style={{gap:16,alignItems:"center"}}><img src={photoUrl||"/default_photo.png"} alt="Foto profil" style={{width:64,height:64,borderRadius:"50%",objectFit:"cover",border:"1px solid var(--line)"}}/><label className="field" style={{flex:1}}><span className="label">Foto profil <em className="opt">JPG/PNG, maks. 5 MiB</em></span><input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={e=>setAvatarFile(e.target.files?.[0]??null)}/></label></div><label className="field"><span className="label">Nama tampilan</span><input required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></label><label className="field"><span className="label">Email</span><input value={email} readOnly/></label><label className="field"><span className="label">Peran</span><input value={role==="admin"?"Petugas":role==="reporter"?"Pengguna":role} readOnly/></label><button className="btn btn-primary" disabled={busy}>{busy?"Menyimpan…":"Simpan perubahan"}</button></form><form className="card stack" onSubmit={changePassword}><h2 className="card-title" style={{marginBottom:0}}>Ubah password</h2><label className="field"><span className="label">Password saat ini</span><input type="password" autoComplete="current-password" required value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)}/></label><label className="field"><span className="label">Password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={newPassword} onChange={e=>setNewPassword(e.target.value)}/></label><label className="field"><span className="label">Konfirmasi password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)}/></label><button className="btn btn-outline" disabled={busy}>Ubah password</button></form>{error&&<Alert>{error}</Alert>}{message&&<p role="status" className="status-msg">{message}</p>}</div></AppShell>;
+ return <AppShell role="user"><Head title="Profil dan pengaturan" subtitle="Informasi akun yang tersimpan di SISKA."/><div className="stack" style={{width:"100%"}}><form className="card stack" onSubmit={save}><h2 className="card-title" style={{marginBottom:0}}>Informasi akun</h2><div className="row" style={{gap:16,alignItems:"center"}}><img src={photoUrl||withBasePath("/default_photo.png")} alt="Foto profil" style={{width:64,height:64,borderRadius:"50%",objectFit:"cover",border:"1px solid var(--line)"}}/><label className="field" style={{flex:1}}><span className="label">Foto profil <em className="opt">JPG/PNG, maks. 5 MiB</em></span><input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={e=>setAvatarFile(e.target.files?.[0]??null)}/></label></div><label className="field"><span className="label">Nama tampilan</span><input required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></label><label className="field"><span className="label">Email</span><input value={email} readOnly/></label><label className="field"><span className="label">Peran</span><input value={role==="admin"?"Petugas":role==="reporter"?"Pengguna":role} readOnly/></label><button className="btn btn-primary" disabled={busy}>{busy?"Menyimpan…":"Simpan perubahan"}</button></form><form className="card stack" onSubmit={changePassword}><h2 className="card-title" style={{marginBottom:0}}>Ubah password</h2><label className="field"><span className="label">Password saat ini</span><input type="password" autoComplete="current-password" required value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)}/></label><label className="field"><span className="label">Password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={newPassword} onChange={e=>setNewPassword(e.target.value)}/></label><label className="field"><span className="label">Konfirmasi password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)}/></label><button className="btn btn-outline" disabled={busy}>Ubah password</button></form>{error&&<Alert>{error}</Alert>}{message&&<p role="status" className="status-msg">{message}</p>}</div></AppShell>;
 }

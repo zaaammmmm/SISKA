@@ -331,7 +331,6 @@ export async function updateEducationMaterial(
   }
   if (input.isPublished !== undefined) updateData.isPublished = input.isPublished;
   if (input.sortOrder !== undefined) updateData.sortOrder = input.sortOrder;
-
   if (input.coverImage !== undefined) {
     if (input.coverImage === null) {
       updateData.coverImageUrl = null;

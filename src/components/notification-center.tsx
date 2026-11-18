@@ -6,10 +6,10 @@ import { onAuthStateChanged } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import {
   fetchNotifications,
-  fetchUnreadNotificationCount,
   markAllNotificationsAsRead,
   markNotificationAsRead,
 } from "@/lib/api-client";
+import { useUnreadSummary } from "@/lib/use-unread-summary";
 import { auth } from "@/lib/firebase";
 import { resolveNotificationTarget, type NotificationRole } from "@/lib/notification-targets";
 import type { SerializedNotificationItem } from "@/types/api";
@@ -42,7 +42,9 @@ export function NotificationCenter({ role }: { role: "user" | "admin" }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<SerializedNotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+  // Badge berasal dari store bersama (dideduplikasi per laporan/pengguna), bukan dihitung ulang di sini.
+  const summary = useUnreadSummary();
+  const unreadCount = summary.total;
   const [isLoading, setIsLoading] = useState(true);
   const [markAllBusy, setMarkAllBusy] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -50,7 +52,6 @@ export function NotificationCenter({ role }: { role: "user" | "admin" }) {
   const refreshNotifications = useCallback(async (showLoading = false) => {
     if (!auth?.currentUser) {
       setItems([]);
-      setUnreadCount(0);
       setIsLoading(false);
       return;
     }
@@ -58,16 +59,11 @@ export function NotificationCenter({ role }: { role: "user" | "admin" }) {
     if (showLoading) setIsLoading(true);
     const requestedUid = auth.currentUser.uid;
     try {
-      // Seluruh data notifikasi diambil melalui API terautentikasi SISKA.
       // Daftar dibatasi agar UI tidak mengunduh seluruh riwayat notifikasi.
-      const [page, count] = await Promise.all([
-        fetchNotifications({ limit: 20 }),
-        fetchUnreadNotificationCount(),
-      ]);
+      const page = await fetchNotifications({ limit: 20 });
       // Abaikan respons lama bila akun berubah selama request berlangsung.
       if (auth.currentUser?.uid !== requestedUid) return;
       setItems(page.items);
-      setUnreadCount(count.unreadCount);
       setLoadError(false);
     } catch {
       if (auth.currentUser?.uid === requestedUid) setLoadError(true);
@@ -76,47 +72,29 @@ export function NotificationCenter({ role }: { role: "user" | "admin" }) {
     }
   }, []);
 
+  // Muat daftar saat login/logout.
   useEffect(() => {
     if (!auth) {
       setItems([]);
-      setUnreadCount(0);
       setIsLoading(false);
       return;
     }
-
-    let active = true;
-    let refreshTimer: ReturnType<typeof setInterval> | undefined;
-
-    const refresh = async (showLoading = false) => {
-      if (!active) return;
-      await refreshNotifications(showLoading);
-    };
-
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (refreshTimer) clearInterval(refreshTimer);
+    return onAuthStateChanged(auth, (user) => {
       if (!user) {
         setItems([]);
-        setUnreadCount(0);
         setIsLoading(false);
         setLoadError(false);
         return;
       }
-
-      void refresh(true);
-      // API tidak menyediakan stream; polling menjaga badge dan daftar tetap mutakhir.
-      refreshTimer = setInterval(() => void refresh(false), 30_000);
+      void refreshNotifications(true);
     });
-
-    const handleFocus = () => void refresh(false);
-    window.addEventListener("focus", handleFocus);
-
-    return () => {
-      active = false;
-      unsubscribeAuth();
-      if (refreshTimer) clearInterval(refreshTimer);
-      window.removeEventListener("focus", handleFocus);
-    };
   }, [refreshNotifications]);
+
+  // Daftar ikut segar setiap kali badge berubah (pesan/laporan baru, atau sudah dibaca di halaman lain).
+  const summaryKey = `${summary.total}:${summary.reports}:${summary.chats}`;
+  useEffect(() => {
+    if (auth?.currentUser) void refreshNotifications(false);
+  }, [summaryKey, refreshNotifications]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -137,7 +115,8 @@ export function NotificationCenter({ role }: { role: "user" | "admin" }) {
       setItems((current) =>
         current.map((item) => item.id === notificationId ? updated : item),
       );
-      setUnreadCount((current) => Math.max(current - 1, 0));
+      // Badge disegarkan oleh event dari api-client; tidak ada "-1" lokal yang bisa meleset
+      // karena badge dihitung per laporan/pengguna, bukan per notifikasi.
       return true;
     } catch {
       await refreshNotifications(false);
@@ -156,7 +135,6 @@ export function NotificationCenter({ role }: { role: "user" | "admin" }) {
           readAt: item.readAt ?? new Date().toISOString(),
         })),
       );
-      setUnreadCount(0);
     } catch {
       await refreshNotifications(false);
     } finally {

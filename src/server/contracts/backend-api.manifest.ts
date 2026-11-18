@@ -335,7 +335,7 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
     allowedRoles: ['reporter', 'admin'],
     ownershipRule: 'Self only (`uid` dari token)',
     rateLimitPolicy: null,
-    description: 'Menghitung jumlah notifikasi belum dibaca untuk badge lonceng topbar.',
+    description: 'Menghitung badge belum dibaca (dideduplikasi: laporan unik + pengguna unik, bukan jumlah pesan).',
   },
   {
     id: 'notifications.markRead',
@@ -354,6 +354,15 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
     ownershipRule: 'Self only (`uid` dari token)',
     rateLimitPolicy: null,
     description: 'Menandai seluruh notifikasi milik pemanggil sebagai telah dibaca dalam satu batch.',
+  },
+  {
+    id: 'notifications.markReadByTarget',
+    method: 'PATCH',
+    path: '/api/v1/notifications/read-by-target',
+    allowedRoles: ['reporter', 'admin'],
+    ownershipRule: 'Self only (`uid` dari token); hanya menyentuh notifikasi milik pemanggil',
+    rateLimitPolicy: null,
+    description: 'Menandai notifikasi untuk satu target (laporan/edukasi) sebagai dibaca saat pengguna membuka targetnya.',
   },
   {
     id: 'admin.notifications.broadcast',

@@ -47,6 +47,27 @@ export {
   type SerializedStatusHistoryItem,
 };
 
+// Pembuatan ID Laporan Unik
+function formatReportId(date: Date, serial: number): string {
+  const year = String(date.getFullYear() % 100).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const seq = String(serial).padStart(2, '0');
+  return `SK-${year}${month}-${day}${seq}`;
+}
+
+async function generateUniqueReportId(db: ReturnType<typeof getAdminDb>, date: Date): Promise<string> {
+  for (let serial = 1; serial <= 99; serial += 1) {
+    const candidate = formatReportId(date, serial);
+    const snapshot = await db.collection('reports').doc(candidate).get();
+    if (!snapshot.exists) {
+      return candidate;
+    }
+  }
+
+  throw new Error('Tidak dapat membuat ID laporan unik hari ini.');
+}
+
 // Serialisasi Dokumen Laporan
 function serializeReportDoc(id: string, data: DocumentData): SerializedReport {
   return {
@@ -72,8 +93,8 @@ export async function createReport(
   const authorized: AuthorizedCaller = requireRole(caller, ['reporter']);
   const db = getAdminDb();
   const now = new Date();
-
-  const reportRef = db.collection('reports').doc();
+  const reportId = await generateUniqueReportId(db, now);
+  const reportRef = db.collection('reports').doc(reportId);
   const historyRef = reportRef.collection('statusHistory').doc();
 
   const reportData: ReportDocument = {

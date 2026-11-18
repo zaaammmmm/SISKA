@@ -176,6 +176,11 @@ export interface NotificationDocument {
   body: string;
   targetType: NotificationTargetType;
   targetId: string | null;
+  /**
+   * UID pengirim peristiwa (mis. pelapor yang mengirim chat). Dipakai agar badge
+   * menghitung jumlah PENGGUNA yang punya pesan belum dibaca, bukan jumlah pesan.
+   */
+  senderUid?: string | null;
   isRead: boolean;
   readAt: Date | string | null;
   createdAt: Date | string;
