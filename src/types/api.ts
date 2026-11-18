@@ -71,6 +71,7 @@ export interface SerializedUserProfile {
   role: UserRole;
   createdAt: string;
   updatedAt: string;
+  photoUrl?: string | null;
 }
 
 /* ========================================================================== */
@@ -138,6 +139,10 @@ export interface CreateEvidenceResult {
 export interface SignedDownloadUrlResult {
   url: string;
   expiresInSeconds: number;
+  /** URL pratinjau foto (JPG/PNG) dengan metadata EXIF/GPS dihapus (`fl_strip_profile`) */
+  previewUrl?: string | null;
+  /** URL pratinjau foto yang diburamkan (`e_blur:1200`) untuk perlindungan trauma visual */
+  blurredPreviewUrl?: string | null;
 }
 
 /* ========================================================================== */
@@ -265,6 +270,7 @@ export interface SerializedEducationItem {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  coverImageUrl?: string | null;
 }
 
 export type PaginatedEducationResult = PaginatedResponse<SerializedEducationItem>;

@@ -206,6 +206,22 @@ export async function updateMyProfileName(
   });
 }
 
+export async function updateMyProfileWithAvatar(params: {
+  displayName: string;
+  avatarFile?: File | null;
+}): Promise<SerializedUserProfile> {
+  if (!params.avatarFile) {
+    return updateMyProfileName(params.displayName);
+  }
+  const formData = new FormData();
+  formData.append('displayName', params.displayName);
+  formData.append('avatar', params.avatarFile);
+  return apiRequest<SerializedUserProfile>('/profile', {
+    method: 'PATCH',
+    formData,
+  });
+}
+
 /**
  * Inisialisasi satu kali profil `reporter` pada saat registrasi akun baru,
  * diikuti penyegaran ID token agar Custom Claim `{ role: 'reporter' }` langsung aktif.
@@ -408,13 +424,36 @@ export async function fetchConversationMessages(
 export async function postConversationMessage(
   conversationId: string,
   body: string,
+  attachmentFile?: File | null,
 ): Promise<SerializedMessage> {
+  if (attachmentFile) {
+    const formData = new FormData();
+    formData.append('body', body);
+    formData.append('file', attachmentFile);
+    return apiRequest<SerializedMessage>(
+      `/conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        method: 'POST',
+        formData,
+      },
+    );
+  }
   return apiRequest<SerializedMessage>(
     `/conversations/${encodeURIComponent(conversationId)}/messages`,
     {
       method: 'POST',
       body: { body },
     },
+  );
+}
+
+export async function fetchMessageAttachmentSignedUrl(
+  conversationId: string,
+  messageId: string,
+): Promise<SignedDownloadUrlResult> {
+  return apiRequest<SignedDownloadUrlResult>(
+    `/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/attachment`,
+    { method: 'GET' },
   );
 }
 
@@ -715,6 +754,7 @@ export const siskaApi = {
   profile: {
     get: fetchMyProfile,
     updateName: updateMyProfileName,
+    updateWithAvatar: updateMyProfileWithAvatar,
     provisionReporter: provisionInitialReporterProfile,
   },
   reports: {
@@ -736,6 +776,7 @@ export const siskaApi = {
     updateByAdmin: updateConversationStatusByAdmin,
     listMessages: fetchConversationMessages,
     sendMessage: postConversationMessage,
+    getAttachmentSignedUrl: fetchMessageAttachmentSignedUrl,
   },
   education: {
     list: fetchEducationList,

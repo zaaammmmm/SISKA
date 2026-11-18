@@ -11,12 +11,12 @@ import { AiChatPanel } from "@/components/ai-chat";
 import {
   SiskaApiClientError, fetchReportsPage, fetchReportsSummary, fetchReportDetail,
   submitNewReport, uploadEvidenceMultipart, openConversation,
-  postConversationMessage, transitionReportStatusByAdmin,
-  updateConversationStatusByAdmin, fetchMyProfile, updateMyProfileName,
+  postConversationMessage, fetchMessageAttachmentSignedUrl, fetchEvidenceSignedDownloadUrl, transitionReportStatusByAdmin,
+  updateConversationStatusByAdmin, fetchMyProfile, updateMyProfileName, updateMyProfileWithAvatar,
   fetchKnowledgeDocumentsByAdmin, uploadKnowledgePdfByAdmin, deleteKnowledgeDocumentByAdmin, triggerKnowledgeReindexByAdmin, fetchAuditEventsByAdmin,
   broadcastNotificationByAdmin,
 } from "@/lib/api-client";
-import type { SerializedReport, SerializedReportDetail, SerializedConversation, SerializedMessage, ReportsSummaryResult, SerializedKnowledgeDocument, SerializedAuditEvent } from "@/types/api";
+import type { SerializedReport, SerializedReportDetail, SerializedConversation, SerializedMessage, ReportsSummaryResult, SerializedKnowledgeDocument, SerializedAuditEvent, SignedDownloadUrlResult } from "@/types/api";
 import { ALLOWED_STATUS_TRANSITIONS, isStatusNoteRequired, type ReportStatus } from "@/types/domain";
 
 const STATUS: Record<ReportStatus, string> = {
@@ -190,9 +190,12 @@ export function LiveHistoryPage({admin=false}:{admin?:boolean}) {
 
 function Detail({id,admin}:{id:string;admin:boolean}) {
  const [report,setReport]=useState<SerializedReportDetail|null>(null);const [error,setError]=useState("");const [busy,setBusy]=useState(false);const [uploadBusy,setUploadBusy]=useState(false);const [next,setNext]=useState<ReportStatus>("under_review");const [note,setNote]=useState("");
+ const [previews,setPreviews]=useState<Record<string,SignedDownloadUrlResult&{revealed?:boolean}>>({});
  const load=useCallback(async()=>{try{setError("");const r=await fetchReportDetail(id);setReport(r);setNext(r.status==="submitted"?"under_review":r.status==="under_review"?"in_progress":"resolved");}catch(e){setError(errorText(e));}},[id]);useEffect(()=>{void load();},[load]);
  async function update(e:React.FormEvent){e.preventDefault();if(!report)return;setBusy(true);setError("");try{await transitionReportStatusByAdmin(id,{status:next,note:note.trim()||undefined});await load();setNote("");}catch(e){setError(errorText(e));}finally{setBusy(false);}}
- async function download(evidenceId:string){try{const {url}=await (await import("@/lib/api-client")).fetchEvidenceSignedDownloadUrl(id,evidenceId);window.open(url,"_blank","noopener,noreferrer");}catch(e){setError(errorText(e));}}
+ async function download(evidenceId:string){try{const {url}=await fetchEvidenceSignedDownloadUrl(id,evidenceId);window.open(url,"_blank","noopener,noreferrer");}catch(e){setError(errorText(e));}}
+ async function previewPhoto(evidenceId:string){try{setError("");const res=await fetchEvidenceSignedDownloadUrl(id,evidenceId);setPreviews(old=>({...old,[evidenceId]:{...res,revealed:false}}));}catch(e){setError(errorText(e));}}
+ function toggleReveal(evidenceId:string){setPreviews(old=>old[evidenceId]?{...old,[evidenceId]:{...old[evidenceId],revealed:!old[evidenceId].revealed}}:old);}
  async function uploadEvidence(file:File){setUploadBusy(true);setError("");try{await uploadEvidenceMultipart(id,file);await load();}catch(e){setError(errorText(e));}finally{setUploadBusy(false);}}
  return (
   <AppShell role={admin?"admin":"user"}>
@@ -211,7 +214,28 @@ function Detail({id,admin}:{id:string;admin:boolean}) {
           <section className="detail-block"><h3>Kronologi</h3><p className="body">{report.description}</p></section>
           <section className="detail-block">
             <h3>Bukti pendukung</h3>
-            {report.evidence.length?<div className="file-list">{report.evidence.map(x=><div key={x.id} className="file-item"><span>{x.originalName}<span className="size">{(x.sizeBytes/1024).toFixed(0)} KB</span></span><button className="btn btn-outline btn-sm" onClick={()=>void download(x.id)}>Unduh<span className="sr-only"> {x.originalName}</span></button></div>)}</div>:<p className="help">Belum ada bukti.</p>}
+            {report.evidence.length?<div className="file-list">{report.evidence.map(x=>{
+              const isPhoto=x.contentType==="image/jpeg"||x.contentType==="image/png";
+              const pv=previews[x.id];
+              const imgSrc=pv?(pv.revealed?(pv.previewUrl||pv.url):(pv.blurredPreviewUrl||pv.previewUrl||pv.url)):"";
+              return (
+              <div key={x.id} className="stack" style={{gap:8}}>
+                <div className="file-item">
+                  <span>{x.originalName}<span className="size">{(x.sizeBytes/1024).toFixed(0)} KB</span></span>
+                  <div className="row" style={{gap:8}}>
+                    {isPhoto&&<button type="button" className="btn btn-outline btn-sm" onClick={()=>pv?toggleReveal(x.id):void previewPhoto(x.id)}>{!pv?"Pratinjau Aman":pv.revealed?"Sembunyikan/Blur":"Tampilkan Jelas"}</button>}
+                    <button type="button" className="btn btn-outline btn-sm" onClick={()=>void download(x.id)}>Unduh<span className="sr-only"> {x.originalName}</span></button>
+                  </div>
+                </div>
+                {pv&&imgSrc&&(
+                  <div className="card" style={{padding:12}}>
+                    <img src={imgSrc} alt={`Pratinjau bukti ${x.originalName}`} style={{maxWidth:"100%",maxHeight:320,borderRadius:8,objectFit:"contain",filter:!pv.revealed&&!pv.blurredPreviewUrl?"blur(18px)":"none",transition:"filter 0.2s ease"}}/>
+                    <p className="help" style={{marginTop:6}}>{pv.revealed?"Pratinjau foto (metadata EXIF/GPS telah dibersihkan).":"Pratinjau disamarkan untuk kenyamanan visual. Klik 'Tampilkan Jelas' untuk melihat foto."}</p>
+                  </div>
+                )}
+              </div>
+              );
+            })}</div>:<p className="help">Belum ada bukti.</p>}
             {!admin&&<label className="field" style={{marginTop:16}}><span className="label">Tambah bukti <em className="opt">PDF, JPG, PNG, maks. 5 MiB</em></span><input type="file" accept="application/pdf,image/jpeg,image/png" disabled={uploadBusy} onChange={e=>{const file=e.target.files?.[0];if(file)void uploadEvidence(file);e.currentTarget.value="";}}/>{uploadBusy&&<span className="help" role="status">Mengunggah bukti…</span>}</label>}
           </section>
           <section className="detail-block">
@@ -272,6 +296,7 @@ function ConversationChat({admin}:{admin:boolean}) {
  const [reporterNames,setReporterNames]=useState<Record<string,string>>({});
  const [currentUid,setCurrentUid]=useState("");
  const [text,setText]=useState("");
+ const [chatFile,setChatFile]=useState<File|null>(null);
  const [error,setError]=useState("");
  const [notice,setNotice]=useState("");
  const [loading,setLoading]=useState(true);
@@ -427,15 +452,25 @@ function ConversationChat({admin}:{admin:boolean}) {
 
  async function send(e:React.FormEvent){
   e.preventDefault();
-  const body=text.trim();
+  const body=text.trim()||(chatFile?`[Lampiran: ${chatFile.name}]`:"");
   if(!active||!body||!current||current.status!=="open")return;
   setBusy(true);setError("");
   try{
-   await postConversationMessage(active,body);
+   await postConversationMessage(active,body,chatFile);
    // Jangan append hasil API ke state lokal: onSnapshot akan menerima dokumen yang sudah committed.
    setText("");
+   setChatFile(null);
   }catch(cause){setError(errorText(cause));}
   finally{setBusy(false);}
+ }
+
+ async function openMessageAttachment(messageId:string){
+  if(!active)return;
+  try{
+   setError("");
+   const signed=await fetchMessageAttachmentSignedUrl(active,messageId);
+   window.open(signed.previewUrl||signed.url,"_blank","noopener,noreferrer");
+  }catch(cause){setError(errorText(cause));}
  }
 
  async function toggleStatus(){
@@ -470,11 +505,21 @@ function ConversationChat({admin}:{admin:boolean}) {
       const isReporter=message.senderUid===current?.reporterId;
       const isMine=message.senderUid===currentUid;
       const author=isReporter?(admin?reporterName:"Anda"):"Admin SISKA";
-      return <div key={message.id} className={`bubble ${isMine?"me":"them"}`}><div className="who">{author}<span>{dateText(message.createdAt)}</span></div>{message.body}</div>;
+      return <div key={message.id} className={`bubble ${isMine?"me":"them"}`}><div className="who">{author}<span>{dateText(message.createdAt)}</span></div><div>{message.body}</div>{message.attachmentPath&&<div style={{marginTop:8}}><button type="button" className="btn btn-outline btn-sm" onClick={()=>void openMessageAttachment(message.id)}>Lihat / Unduh Lampiran</button></div>}</div>;
      })}
      {!messages.length&&<p className="help">{current?"Belum ada pesan. Mulai percakapan dengan mengirim pesan.":"Pilih percakapan untuk melihat pesan."}</p>}
     </div>
-    <form className="compose" onSubmit={send}><div className="compose-row"><input type="text" aria-label="Tulis pesan" value={text} onChange={event=>setText(event.target.value)} maxLength={10000} placeholder={current?.status==="closed"?"Percakapan ini sudah ditutup":"Tulis pesan…"} disabled={!current||current.status==="closed"||busy}/><button className="btn btn-primary btn-sm" disabled={!current||current.status==="closed"||busy||!text.trim()}>Kirim</button></div></form>
+    <form className="compose" onSubmit={send}>
+     {chatFile&&<div className="row" style={{marginBottom:8,fontSize:12}}><span>Lampiran: <b>{chatFile.name}</b> ({(chatFile.size/1024).toFixed(0)} KB)</span><button type="button" className="link-teal" onClick={()=>setChatFile(null)}>Hapus</button></div>}
+     <div className="compose-row">
+      <input type="text" aria-label="Tulis pesan" value={text} onChange={event=>setText(event.target.value)} maxLength={10000} placeholder={current?.status==="closed"?"Percakapan ini sudah ditutup":"Tulis pesan atau lampirkan foto…"} disabled={!current||current.status==="closed"||busy}/>
+      <label className="btn btn-outline btn-sm" style={{cursor:!current||current.status==="closed"||busy?"not-allowed":"pointer"}}>
+       Lampirkan Foto
+       <input type="file" hidden accept="image/jpeg,image/png,application/pdf" disabled={!current||current.status==="closed"||busy} onChange={e=>{const f=e.target.files?.[0];if(f){if(f.size>5*1024*1024){setError("Ukuran lampiran maksimal 5 MiB.");}else{setChatFile(f);}}e.currentTarget.value="";}}/>
+      </label>
+      <button className="btn btn-primary btn-sm" disabled={!current||current.status==="closed"||busy||(!text.trim()&&!chatFile)}>Kirim</button>
+     </div>
+    </form>
    </section>
   </div>
  </AppShell>;
@@ -628,10 +673,10 @@ export function LiveAdminAuditPage(){
 }
 
 export function LiveProfilePage(){
- const [name,setName]=useState("");const [email,setEmail]=useState("");const [role,setRole]=useState("");const [error,setError]=useState("");const [message,setMessage]=useState("");const [busy,setBusy]=useState(false);
+ const [name,setName]=useState("");const [email,setEmail]=useState("");const [role,setRole]=useState("");const [photoUrl,setPhotoUrl]=useState<string|null>(null);const [avatarFile,setAvatarFile]=useState<File|null>(null);const [error,setError]=useState("");const [message,setMessage]=useState("");const [busy,setBusy]=useState(false);
  const [currentPassword,setCurrentPassword]=useState("");const [newPassword,setNewPassword]=useState("");const [confirmPassword,setConfirmPassword]=useState("");
- useEffect(()=>{fetchMyProfile().then(p=>{setName(p.displayName);setEmail(p.email);setRole(p.role);}).catch(e=>setError(errorText(e)));},[]);
- async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");setMessage("");try{const p=await updateMyProfileName(name.trim());if(auth?.currentUser) await updateProfile(auth.currentUser,{displayName:p.displayName});setName(p.displayName);setMessage("Nama profil berhasil diperbarui.");}catch(e){setError(errorText(e));}finally{setBusy(false);}}
+ useEffect(()=>{fetchMyProfile().then(p=>{setName(p.displayName);setEmail(p.email);setRole(p.role);setPhotoUrl(p.photoUrl??null);}).catch(e=>setError(errorText(e)));},[]);
+ async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");setMessage("");try{const p=await updateMyProfileWithAvatar({displayName:name.trim(),avatarFile});if(auth?.currentUser) await updateProfile(auth.currentUser,{displayName:p.displayName,...(p.photoUrl?{photoURL:p.photoUrl}:{})});setName(p.displayName);if(p.photoUrl)setPhotoUrl(p.photoUrl);setAvatarFile(null);setMessage(avatarFile?"Profil dan foto berhasil diperbarui.":"Nama profil berhasil diperbarui.");}catch(e){setError(errorText(e));}finally{setBusy(false);}}
  async function changePassword(e:React.FormEvent){e.preventDefault();setError("");setMessage("");if(newPassword.length<6){setError("Password baru minimal 6 karakter.");return;}if(newPassword!==confirmPassword){setError("Konfirmasi password tidak sama.");return;}const user=auth?.currentUser;if(!user?.email){setError("Sesi akun tidak ditemukan. Silakan login ulang.");return;}setBusy(true);try{await reauthenticateWithCredential(user,EmailAuthProvider.credential(user.email,currentPassword));await updatePassword(user,newPassword);setCurrentPassword("");setNewPassword("");setConfirmPassword("");setMessage("Password berhasil diperbarui.");}catch(e){setError((e as {code?:string})?.code==="auth/wrong-password"?"Password saat ini tidak sesuai.":"Password belum dapat diperbarui. Silakan login ulang jika sesi kedaluwarsa.");}finally{setBusy(false);}}
- return <AppShell role="user"><Head title="Profil dan pengaturan" subtitle="Informasi akun yang tersimpan di SISKA."/><div className="stack" style={{maxWidth:640}}><form className="card stack" onSubmit={save}><h2 className="card-title" style={{marginBottom:0}}>Informasi akun</h2><label className="field"><span className="label">Nama tampilan</span><input required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></label><label className="field"><span className="label">Email</span><input value={email} readOnly/></label><label className="field"><span className="label">Peran</span><input value={role==="admin"?"Petugas":role==="reporter"?"Pengguna":role} readOnly/></label><button className="btn btn-primary" disabled={busy}>{busy?"Menyimpan…":"Simpan perubahan"}</button></form><form className="card stack" onSubmit={changePassword}><h2 className="card-title" style={{marginBottom:0}}>Ubah password</h2><label className="field"><span className="label">Password saat ini</span><input type="password" autoComplete="current-password" required value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)}/></label><label className="field"><span className="label">Password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={newPassword} onChange={e=>setNewPassword(e.target.value)}/></label><label className="field"><span className="label">Konfirmasi password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)}/></label><button className="btn btn-outline" disabled={busy}>Ubah password</button></form>{error&&<Alert>{error}</Alert>}{message&&<p role="status" className="status-msg">{message}</p>}</div></AppShell>;
+ return <AppShell role="user"><Head title="Profil dan pengaturan" subtitle="Informasi akun yang tersimpan di SISKA."/><div className="stack" style={{maxWidth:640}}><form className="card stack" onSubmit={save}><h2 className="card-title" style={{marginBottom:0}}>Informasi akun</h2><div className="row" style={{gap:16,alignItems:"center"}}><img src={photoUrl||"/default_photo.png"} alt="Foto profil" style={{width:64,height:64,borderRadius:"50%",objectFit:"cover",border:"1px solid var(--line)"}}/><label className="field" style={{flex:1}}><span className="label">Foto profil <em className="opt">JPG/PNG, maks. 5 MiB</em></span><input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={e=>setAvatarFile(e.target.files?.[0]??null)}/></label></div><label className="field"><span className="label">Nama tampilan</span><input required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></label><label className="field"><span className="label">Email</span><input value={email} readOnly/></label><label className="field"><span className="label">Peran</span><input value={role==="admin"?"Petugas":role==="reporter"?"Pengguna":role} readOnly/></label><button className="btn btn-primary" disabled={busy}>{busy?"Menyimpan…":"Simpan perubahan"}</button></form><form className="card stack" onSubmit={changePassword}><h2 className="card-title" style={{marginBottom:0}}>Ubah password</h2><label className="field"><span className="label">Password saat ini</span><input type="password" autoComplete="current-password" required value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)}/></label><label className="field"><span className="label">Password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={newPassword} onChange={e=>setNewPassword(e.target.value)}/></label><label className="field"><span className="label">Konfirmasi password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)}/></label><button className="btn btn-outline" disabled={busy}>Ubah password</button></form>{error&&<Alert>{error}</Alert>}{message&&<p role="status" className="status-msg">{message}</p>}</div></AppShell>;
 }
