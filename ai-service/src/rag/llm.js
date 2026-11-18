@@ -3,13 +3,35 @@ export function embedModel() {
     return process.env.OLLAMA_EMBED_MODEL || 'qwen3-embedding:0.6b';
 }
 export function chatModel() {
-    return process.env.OLLAMA_CHAT_MODEL || 'qwen3:4b-instruct';
+    return process.env.OLLAMA_CHAT_MODEL || 'qwen25c3b-8k:latest';
+}
+/**
+ * Bandingkan nama model dengan daftar dari /api/tags. Ollama menambahkan tag `:latest`
+ * bila tag tidak ditulis, jadi `foo` dan `foo:latest` dianggap sama.
+ */
+export function hasModel(models, wanted) {
+    const norm = (n) => String(n || '').trim().toLowerCase().replace(/:latest$/, '');
+    const target = norm(wanted);
+    return Array.isArray(models) && models.some((m) => norm(m) === target);
+}
+/**
+ * Parameter `think` hanya dikirim bila OLLAMA_THINK diisi (true/false). Model non-thinking
+ * seperti Qwen2.5 tidak mendukung fitur ini, dan versi Ollama tertentu menolak request
+ * yang memuat `think` untuk model tersebut (HTTP 400).
+ */
+function thinkOption() {
+    const v = (process.env.OLLAMA_THINK || '').trim().toLowerCase();
+    if (v === 'true' || v === '1')
+        return { think: true };
+    if (v === 'false' || v === '0')
+        return { think: false };
+    return {};
 }
 export function genOpts() {
     return {
         temperature: Number(process.env.LLM_TEMPERATURE ?? 0),
         seed: Number(process.env.LLM_SEED ?? 42),
-        num_ctx: Number(process.env.LLM_NUM_CTX ?? 6144),
+        num_ctx: Number(process.env.LLM_NUM_CTX ?? 8192),
         num_predict: Number(process.env.LLM_MAX_NEW_TOKENS ?? 350),
     };
 }
@@ -51,7 +73,9 @@ export async function chat(baseUrl, system, user) {
     const data = await fetchJson(`${baseUrl.replace(/\/$/, '')}/api/chat`, {
         model: chatModel(),
         stream: false,
-        think: false,
+        ...thinkOption(),
+        // Tahan model di memori agar chat berikutnya tidak menunggu model dimuat ulang.
+        keep_alive: process.env.OLLAMA_KEEP_ALIVE || '30m',
         messages: [
             { role: 'system', content: system },
             { role: 'user', content: user },

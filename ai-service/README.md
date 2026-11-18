@@ -79,7 +79,7 @@ menjalankan test loader repo SISKA dan Java JDK 11+ untuk Firebase Emulator.
    `ai-service/.env.example` menjadi `ai-service/.env`.
 2. Buat nilai acak untuk `AI_SERVICE_SHARED_SECRET`, lalu isi nilai yang sama di kedua file tersebut.
    Jangan gunakan secret contoh untuk server online.
-3. Siapkan Ollama dan model `qwen3-embedding:0.6b` serta `qwen3:4b-instruct`.
+3. Siapkan Ollama dan model `qwen3-embedding:0.6b` (embedding, wajib sama dengan notebook) serta `qwen25c3b-8k:latest` (chat).
 4. Jalankan `firebase emulators:start --project demo-siska`, lalu `npm run seed`.
 5. Jalankan `npm start --prefix ai-service`.
 6. Di terminal lain jalankan `npm ci` (sekali) dan `npm run dev` dari root SISKA.

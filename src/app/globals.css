@@ -811,7 +811,9 @@ button.input-icon svg { width: 20px; height: 20px; }
 .bubble.me { background: var(--primary); color: #fff; border-bottom-right-radius: 6px; align-self: flex-end; }
 .bubble .who { display: flex; justify-content: space-between; gap: 24px; font-size: .75rem; font-weight: 600; color: var(--primary-700); margin-bottom: 4px; white-space: normal; }
 .bubble .who span { font-weight: 400; color: var(--muted); }
-.bubble.me .who, .bubble.me .who span { color: #d8eeec; }
+.bubble-meta { display: inline-flex; align-items: center; gap: 8px; }
+.bubble .who .response-time { padding: 2px 7px; border-radius: 999px; background: var(--primary-50); color: var(--primary-700); font-size: .6875rem; font-weight: 600; }
+.bubble.me .who .bubble-meta span { color: #d8eeec; }
 .unread-divider { display: flex; align-items: center; gap: 12px; margin: 6px 0; color: var(--primary-700); font-size: .75rem; font-weight: 600; }
 .unread-divider::before, .unread-divider::after { content: ""; flex: 1; height: 1px; background: var(--primary); opacity: .45; }
 .unread-divider span { padding: 4px 12px; border-radius: 999px; background: var(--primary-50); white-space: nowrap; }

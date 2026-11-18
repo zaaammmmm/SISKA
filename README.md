@@ -87,7 +87,7 @@ Pastikan perangkat lunak berikut sudah tersedia:
 - Git
 - Optional: Ollama untuk AI service lokal
 
-Untuk pengembangan AI local, layanan AI biasanya menggunakan model seperti `qwen3-embedding:0.6b` dan `qwen3:4b-instruct` yang di-host melalui Ollama.
+Untuk pengembangan AI local, layanan AI menggunakan `qwen25c3b-8k:latest` sebagai model chat dan `qwen3-embedding:0.6b` sebagai model embedding (indeks RAG sudah dibangun dengan embedding ini) yang di-host melalui Ollama.
 
 ## Quick start
 

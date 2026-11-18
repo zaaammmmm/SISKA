@@ -10,6 +10,11 @@ import {
   validateAiChatInput,
 } from '@/server/validators';
 
+// Model lokal (via Ollama) bisa butuh puluhan detik; tanpa ini fungsi Vercel
+// dipotong pada batas bawaan (~10 dtk di plan Hobby) sebelum jawaban selesai.
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 // POST /api/v1/ai/chat
 export const POST = withAuthenticatedRoute(
   async ({ request, requestId, caller }) => {

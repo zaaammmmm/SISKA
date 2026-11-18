@@ -13,12 +13,18 @@ type Message = {
   author: string;
   time: string;
   text: string;
+  responseTimeMs?: number;
 };
 
 const nowTime = () =>
   new Date()
     .toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
     .replace(":", ".");
+
+const formatResponseTime = (milliseconds: number) => {
+  const seconds = milliseconds / 1000;
+  return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} dtk`;
+};
 
 const SUGGESTED_QUESTIONS = [
   "Apa itu SISKA?",
@@ -35,7 +41,11 @@ function isStoredMessage(value: unknown): value is Message {
     (message.from === "me" || message.from === "them") &&
     typeof message.author === "string" &&
     typeof message.time === "string" &&
-    typeof message.text === "string"
+    typeof message.text === "string" &&
+    (message.responseTimeMs === undefined ||
+      (typeof message.responseTimeMs === "number" &&
+        Number.isFinite(message.responseTimeMs) &&
+        message.responseTimeMs >= 0))
   );
 }
 
@@ -78,6 +88,7 @@ export function AiChatPanel() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -188,6 +199,11 @@ export function AiChatPanel() {
     setInput("");
     setError("");
     setLoading(true);
+    setElapsedMs(0);
+    const startedAt = performance.now();
+    const elapsedTimer = window.setInterval(() => {
+      setElapsedMs(performance.now() - startedAt);
+    }, 250);
     if (
       sessionUserId &&
       !saveSession(sessionUserId, {
@@ -213,6 +229,7 @@ export function AiChatPanel() {
           author: "SISKA AI",
           time: nowTime(),
           text: reply,
+          responseTimeMs: performance.now() - startedAt,
         },
       ];
       setMessages(completedMessages);
@@ -229,6 +246,7 @@ export function AiChatPanel() {
     } catch (requestError: unknown) {
       setError(getErrorMessage(requestError));
     } finally {
+      window.clearInterval(elapsedTimer);
       setLoading(false);
     }
   }
@@ -286,14 +304,22 @@ export function AiChatPanel() {
             <div key={message.id} className={`bubble ${message.from}`}>
               <div className="who">
                 {message.author}
-                <span>{message.time}</span>
+                <span className="bubble-meta">
+                  {message.from === "them" && message.responseTimeMs !== undefined && (
+                    <span className="response-time">{formatResponseTime(message.responseTimeMs)}</span>
+                  )}
+                  <span>{message.time}</span>
+                </span>
               </div>
               {message.text}
             </div>
           ))}
           {loading && (
             <div className="bubble them" role="status">
-              <div className="who">SISKA AI</div>
+              <div className="who">
+                SISKA AI
+                <span className="response-time">{formatResponseTime(elapsedMs)}</span>
+              </div>
               Sedang menulis jawaban…
             </div>
           )}

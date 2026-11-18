@@ -6,7 +6,7 @@ import {
 } from './config.js';
 import { answer, invalidateRetrievalCache } from './rag/rag.js';
 import { loadIndex } from './rag/indexStore.js';
-import { pingOllama } from './rag/llm.js';
+import { pingOllama, hasModel, chatModel, embedModel } from './rag/llm.js';
 import { getSettings, setSettings, resolveBaseUrl } from './rag/settingsStore.js';
 import { listDocs, addDocument, deleteDocument, readWebDocRegistry } from './rag/docStore.js';
 import { SessionStore } from './rag/sessions.js';
@@ -124,6 +124,9 @@ async function handleHealth() {
     indexLoaded: indexOk,
     chunkCount,
     llmReachable: ollama.up,
+    // Informasi saja (tidak mengubah `status`): apakah model chat/embedding sudah di-pull di Ollama.
+    chatModelLoaded: ollama.up ? hasModel(ollama.models, chatModel()) : false,
+    embeddingModelLoaded: ollama.up ? hasModel(ollama.models, embedModel()) : false,
     backend: settings.backend,
   };
 }

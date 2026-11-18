@@ -39,3 +39,13 @@ test('kontrak: tidak membocorkan route/backend/latency; grounded hanya bila ada 
   assert.equal(toContractResponse({ route: 'smalltalk', answer: 'halo', sources: [] }).grounded, false);
   assert.equal(toContractResponse({ route: 'answered', answer: 'x', sources: [] }).grounded, false);
 });
+
+import { hasModel } from '../src/rag/llm.js';
+
+test('hasModel: tag :latest dianggap sama dengan tanpa tag', () => {
+  assert.equal(hasModel(['qwen25c3b-8k:latest'], 'qwen25c3b-8k'), true);
+  assert.equal(hasModel(['qwen25c3b-8k'], 'qwen25c3b-8k:latest'), true);
+  assert.equal(hasModel(['qwen3-embedding:0.6b'], 'qwen3-embedding:0.6b'), true);
+  assert.equal(hasModel(['qwen25c3b-8k:latest'], 'qwen3-embedding:0.6b'), false);
+  assert.equal(hasModel(undefined, 'x'), false);
+});
