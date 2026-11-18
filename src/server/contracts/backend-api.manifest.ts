@@ -199,6 +199,33 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
 
   // Knowledge Base & Audit
   {
+    id: 'admin.aiDocs.list',
+    method: 'GET',
+    path: '/api/v1/admin/ai-documents',
+    allowedRoles: ['admin'],
+    ownershipRule: 'Admin only; mengambil daftar dokumen sumber aktif pada indeks RAG AI Service',
+    rateLimitPolicy: null,
+    description: 'Daftar dokumen sumber RAG SISKA AI (.md, .txt, .pdf) beserta jumlah chunk dan asal dokumen (notebook / web).',
+  },
+  {
+    id: 'admin.aiDocs.upload',
+    method: 'POST',
+    path: '/api/v1/admin/ai-documents',
+    allowedRoles: ['admin'],
+    ownershipRule: 'Admin only; ekstraksi teks PDF/Markdown/TXT, chunking, embedding ke AI Service, dan pencatatan audit log',
+    rateLimitPolicy: 'ADMIN_MUTATION',
+    description: 'Menambahkan dan mengindeks dokumen sumber pengetahuan SISKA AI (.pdf, .md, atau .txt) ke indeks RAG.',
+  },
+  {
+    id: 'admin.aiDocs.delete',
+    method: 'DELETE',
+    path: '/api/v1/admin/ai-documents',
+    allowedRoles: ['admin'],
+    ownershipRule: 'Admin only; hanya dokumen sumber web (admin) yang dapat dihapus, sumber notebook dilindungi',
+    rateLimitPolicy: 'ADMIN_MUTATION',
+    description: 'Menghapus dokumen sumber pengetahuan SISKA AI yang ditambahkan admin beserta seluruh vektor embeddingnya.',
+  },
+  {
     id: 'admin.kb.list',
     method: 'GET',
     path: '/api/v1/admin/knowledge-documents',

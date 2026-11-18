@@ -796,6 +796,10 @@ export const siskaApi = {
     ask: askSiskaAiQuestion,
   },
   admin: {
+    listAiRagDocuments: fetchAiRagDocumentsByAdmin,
+    addAiRagDocument: addAiRagDocumentByAdmin,
+    uploadAiRagPdf: uploadAiRagPdfByAdmin,
+    deleteAiRagDocument: deleteAiRagDocumentByAdmin,
     listKnowledgeDocuments: fetchKnowledgeDocumentsByAdmin,
     uploadKnowledgePdf: uploadKnowledgePdfByAdmin,
     deleteKnowledgeDocument: deleteKnowledgeDocumentByAdmin,

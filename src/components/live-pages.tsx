@@ -13,10 +13,11 @@ import {
   submitNewReport, uploadEvidenceMultipart, openConversation,
   postConversationMessage, fetchMessageAttachmentSignedUrl, fetchEvidenceSignedDownloadUrl, transitionReportStatusByAdmin,
   updateConversationStatusByAdmin, fetchMyProfile, updateMyProfileName, updateMyProfileWithAvatar,
+  fetchAiRagDocumentsByAdmin, addAiRagDocumentByAdmin, uploadAiRagPdfByAdmin, deleteAiRagDocumentByAdmin,
   fetchKnowledgeDocumentsByAdmin, uploadKnowledgePdfByAdmin, deleteKnowledgeDocumentByAdmin, triggerKnowledgeReindexByAdmin, fetchAuditEventsByAdmin,
   broadcastNotificationByAdmin,
 } from "@/lib/api-client";
-import type { SerializedReport, SerializedReportDetail, SerializedConversation, SerializedMessage, ReportsSummaryResult, SerializedKnowledgeDocument, SerializedAuditEvent, SignedDownloadUrlResult } from "@/types/api";
+import type { SerializedReport, SerializedReportDetail, SerializedConversation, SerializedMessage, ReportsSummaryResult, SerializedAiRagDocument, SerializedKnowledgeDocument, SerializedAuditEvent, SignedDownloadUrlResult } from "@/types/api";
 import { ALLOWED_STATUS_TRANSITIONS, isStatusNoteRequired, type ReportStatus } from "@/types/domain";
 
 const STATUS: Record<ReportStatus, string> = {
@@ -621,36 +622,175 @@ export function LiveAdminDashboard(){
 
 
 export function LiveAdminDocumentsPage(){
- const [documents,setDocuments]=useState<SerializedKnowledgeDocument[]>([]);const [file,setFile]=useState<File|null>(null);const [title,setTitle]=useState("");const [error,setError]=useState("");const [notice,setNotice]=useState("");const [loading,setLoading]=useState(false);const [saving,setSaving]=useState(false);const [deleting,setDeleting]=useState("");const [reindexing,setReindexing]=useState(false);
- const load=useCallback(async()=>{setLoading(true);setError("");try{const result=await fetchKnowledgeDocumentsByAdmin();setDocuments(result.items);}catch(e){setError(errorText(e));}finally{setLoading(false);}},[]);
+ const [documents,setDocuments]=useState<SerializedAiRagDocument[]>([]);
+ const [fileName,setFileName]=useState("");
+ const [pdfFile,setPdfFile]=useState<File|null>(null);
+ const [cite,setCite]=useState("");
+ const [content,setContent]=useState("");
+ const [error,setError]=useState("");
+ const [notice,setNotice]=useState("");
+ const [loading,setLoading]=useState(false);
+ const [saving,setSaving]=useState(false);
+ const [deleting,setDeleting]=useState("");
+
+ const load=useCallback(async()=>{
+  setLoading(true);
+  setError("");
+  try{
+   const result=await fetchAiRagDocumentsByAdmin();
+   setDocuments(result.items);
+  }catch(e){
+   setError(errorText(e));
+  }finally{
+   setLoading(false);
+  }
+ },[]);
+
  useEffect(()=>{void load();},[load]);
- async function upload(e:React.FormEvent){e.preventDefault();if(!file)return;setSaving(true);setError("");setNotice("");try{await uploadKnowledgePdfByAdmin(file,title.trim()||undefined);setFile(null);setTitle("");const picker=document.getElementById("siska-kb-pdf") as HTMLInputElement|null;if(picker)picker.value="";setNotice("Dokumen diterima backend dan masuk ke proses indeks.");await load();}catch(e){setError(errorText(e));}finally{setSaving(false);}}
- async function remove(doc:SerializedKnowledgeDocument){if(!window.confirm(`Hapus dokumen "${doc.title}" dan seluruh chunk terkait?`))return;setDeleting(doc.id);setError("");try{await deleteKnowledgeDocumentByAdmin(doc.id);setNotice(`Dokumen “${doc.title}” berhasil dihapus.`);await load();}catch(e){setError(errorText(e));}finally{setDeleting("");}}
- async function reindex(){setReindexing(true);setError("");setNotice("");try{const result=await triggerKnowledgeReindexByAdmin();setNotice(`Reindex ${result.status}: ${result.processedCount} diproses, ${result.indexedCount} berhasil, ${result.failedCount} gagal.`);await load();}catch(e){setError(errorText(e));}finally{setReindexing(false);}}
+
+ async function handleFileSelect(selected:File|null){
+  if(!selected)return;
+  setError("");
+  setNotice("");
+  const name=selected.name;
+  if(!/\.(md|txt|pdf)$/i.test(name)){
+   setError("Format dokumen tidak didukung. Pilih berkas berformat .pdf, .md, atau .txt.");
+   return;
+  }
+  const inferredTitle=name.replace(/\.(md|txt|pdf)$/i,"").replace(/[-_]+/g," ").trim();
+  setFileName(name);
+  if(!cite.trim())setCite(inferredTitle);
+
+  if(/\.pdf$/i.test(name)){
+   if(selected.size>25*1024*1024){
+    setError("Ukuran berkas PDF melebihi batas maksimum 25 MiB.");
+    setPdfFile(null);
+    return;
+   }
+   setPdfFile(selected);
+   setContent("");
+  }else{
+   try{
+    const text=await selected.text();
+    if(text.length>300_000){
+     setError("Isi dokumen melebihi batas maksimum 300.000 karakter.");
+     return;
+    }
+    setPdfFile(null);
+    setContent(text);
+   }catch{
+    setError("Isi berkas teks tidak dapat dibaca. Coba pilih berkas .md atau .txt lain.");
+   }
+  }
+ }
+
+ async function upload(e:React.FormEvent){
+  e.preventDefault();
+  if(!fileName.trim()||!cite.trim()||(!pdfFile&&!content.trim()))return;
+  setSaving(true);
+  setError("");
+  setNotice("");
+  try{
+   const created=pdfFile
+    ?await uploadAiRagPdfByAdmin(pdfFile,cite.trim())
+    :await addAiRagDocumentByAdmin({file:fileName.trim(),cite:cite.trim(),content});
+   setFileName("");
+   setPdfFile(null);
+   setCite("");
+   setContent("");
+   const picker=document.getElementById("siska-ai-doc-file") as HTMLInputElement|null;
+   if(picker)picker.value="";
+   setNotice(`Dokumen "${created.cite}" (${created.file}) berhasil ditambahkan dan diindeks ke SISKA AI (${created.chunkCount} potongan).`);
+   await load();
+  }catch(e){
+   setError(errorText(e));
+  }finally{
+   setSaving(false);
+  }
+ }
+
+ async function remove(doc:SerializedAiRagDocument){
+  if(doc.source!=="web")return;
+  if(!window.confirm(`Hapus dokumen "${doc.cite}" (${doc.file}) dari sumber pengetahuan SISKA AI?`))return;
+  setDeleting(doc.file);
+  setError("");
+  setNotice("");
+  try{
+   await deleteAiRagDocumentByAdmin(doc.file);
+   setNotice(`Dokumen “${doc.cite}” (${doc.file}) berhasil dihapus dari indeks SISKA AI.`);
+   await load();
+  }catch(e){
+   setError(errorText(e));
+  }finally{
+   setDeleting("");
+  }
+ }
+
+ const canSubmit=!saving&&Boolean(fileName.trim())&&Boolean(cite.trim())&&Boolean(pdfFile||content.trim());
+
  return (
  <AppShell role="admin">
-  <Head title="Dokumen SISKA AI" subtitle="Unggah PDF sebagai sumber jawaban SISKA AI, pantau status indeks, dan jalankan indeks ulang."/>
+  <Head title="Dokumen SISKA AI" subtitle="Unggah berkas PDF, Markdown (.md), atau teks (.txt) sebagai sumber jawaban SISKA AI dan kelola indeks pengetahuannya."/>
   {error&&<Alert>{error}</Alert>}
   {notice&&<p className="status-msg" role="status">{notice}</p>}
   <div className="two-col">
-   <form className="card" onSubmit={upload}>
-    <h2 className="card-title">Unggah dokumen PDF</h2>
-    <label className="field"><span className="label">Judul dokumen <em className="opt">boleh dikosongkan</em></span><input maxLength={250} value={title} onChange={e=>setTitle(e.target.value)} placeholder="Pedoman layanan SISKA"/></label>
-    <label className="field"><span className="label">Berkas PDF <em className="req">wajib, maks. 25 MiB</em></span><input id="siska-kb-pdf" type="file" accept="application/pdf,.pdf" required onChange={e=>setFile(e.target.files?.[0]??null)}/></label>
-    {file&&<p className="help" style={{marginTop:8}}>{file.name}, {(file.size/1024/1024).toFixed(2)} MiB</p>}
-    <div className="actions"><button className="btn btn-primary" disabled={!file||saving}>{saving?"Mengunggah…":"Unggah dan indeks"}</button></div>
+   <form className="card stack" onSubmit={upload}>
+    <h2 className="card-title" style={{marginBottom:0}}>Tambah sumber pengetahuan SISKA AI</h2>
+    <label className="field">
+     <span className="label">Pilih berkas (.pdf, .md, atau .txt) <em className="opt">PDF maks. 25 MiB</em></span>
+     <input id="siska-ai-doc-file" type="file" accept=".pdf,.md,.txt,application/pdf,text/markdown,text/plain" onChange={e=>void handleFileSelect(e.target.files?.[0]??null)}/>
+     {pdfFile&&<span className="help">Berkas PDF terpilih: <b>{pdfFile.name}</b> ({(pdfFile.size/1024/1024).toFixed(2)} MiB). Teks akan diekstrak otomatis di server.</span>}
+    </label>
+    <label className="field">
+     <span className="label">Nama berkas sumber <em className="req">wajib, akhiran .pdf / .md / .txt</em></span>
+     <input required maxLength={125} value={fileName} onChange={e=>{const next=e.target.value;setFileName(next);if(pdfFile&&next!==pdfFile.name)setPdfFile(null);}} placeholder="Contoh: panduan-layanan.md atau pedoman-ppks.pdf"/>
+    </label>
+    <label className="field">
+     <span className="label">Judul sitasi sumber <em className="req">wajib</em></span>
+     <input required maxLength={200} value={cite} onChange={e=>setCite(e.target.value)} placeholder="Contoh: Panduan Layanan SISKA"/>
+    </label>
+    {!pdfFile&&(
+     <label className="field">
+      <span className="label">Isi dokumen (.md / .txt) <em className="req">wajib untuk dokumen teks</em></span>
+      <textarea className="textarea" rows={7} maxLength={300000} value={content} onChange={e=>setContent(e.target.value)} placeholder={"# Judul Bagian\n\nTulis atau pilih berkas .md / .txt yang berisi informasi resmi terverifikasi."}/>
+      <span className="help">Maksimal 300.000 karakter. Jangan memasukkan kronologi laporan atau data pribadi pengguna.</span>
+     </label>
+    )}
+    <div className="actions" style={{marginTop:4}}>
+     <button className="btn btn-primary" disabled={!canSubmit}>{saving?"Mengunggah & mengindeks…":"Tambah dan indeks dokumen"}</button>
+     {(fileName||cite||content||pdfFile)&&<button type="button" className="btn btn-outline" disabled={saving} onClick={()=>{setFileName("");setPdfFile(null);setCite("");setContent("");setError("");const picker=document.getElementById("siska-ai-doc-file") as HTMLInputElement|null;if(picker)picker.value="";}}>Bersihkan</button>}
+    </div>
    </form>
-   <section className="card">
-    <h2 className="card-title">Indeks ulang</h2>
-    <p className="prose" style={{marginBottom:20}}>Meminta backend memproses ulang semua dokumen yang tersedia. Status akhir bisa berubah setelah pekerjaan selesai.</p>
-    <div className="row"><button className="btn btn-outline" disabled={reindexing||loading} onClick={()=>void reindex()}>{reindexing?"Meminta indeks ulang…":"Jalankan indeks ulang"}</button><button className="btn btn-outline" disabled={loading} onClick={()=>void load()}>Muat ulang daftar</button></div>
+   <section className="card stack">
+    <h2 className="card-title" style={{marginBottom:0}}>Cara kerja indeks SISKA AI</h2>
+    <p className="prose">
+     Dokumen Markdown (<code>.md</code>) dan teks (<code>.txt</code>) langsung dipecah menjadi potongan konteks (<em>chunks</em>) dan dibuat vektor <em>embedding</em>-nya oleh AI Service. Berkas PDF berteks diekstrak secara otomatis per halaman di backend sebelum diindeks.
+    </p>
+    <p className="help">
+     Perubahan indeks langsung aktif untuk pertanyaan pengguna berikutnya tanpa perlu menjalankan ulang notebook. PDF hasil pemindaian (<em>scan</em> gambar) memerlukan proses OCR terlebih dahulu sebelum diunggah.
+    </p>
+    <div className="row">
+     <button type="button" className="btn btn-outline" disabled={loading||saving} onClick={()=>void load()}>{loading?"Memuat…":"Muat ulang daftar"}</button>
+    </div>
    </section>
   </div>
   <section className="card" style={{marginTop:32}}>
-   <div className="section-head"><h2>Dokumen terdaftar</h2><span className="chip">{documents.length} dokumen</span></div>
+   <div className="section-head"><h2>Dokumen sumber terdaftar</h2><span className="chip">{documents.length} dokumen</span></div>
    {loading&&<p className="loading" role="status">Memuat dokumen…</p>}
-   {!loading&&!documents.length&&<p className="help">Belum ada dokumen. Unggah PDF pertama di atas.</p>}
-   {documents.map(doc=><div key={doc.id} className="doc-row"><div style={{minWidth:0}}><b>{doc.title}</b><div className="help">{doc.status.toUpperCase()}, {doc.chunkCount} potongan, versi {doc.version}, {dateText(doc.updatedAt)}</div>{doc.errorCode&&<div className="error-text" style={{marginTop:4}}>Kode galat: {doc.errorCode}</div>}</div><button className="btn btn-outline btn-sm" disabled={deleting===doc.id} onClick={()=>void remove(doc)}>{deleting===doc.id?"Menghapus…":"Hapus"}<span className="sr-only"> {doc.title}</span></button></div>)}
+   {!loading&&!documents.length&&<p className="help">Belum ada dokumen sumber yang terdaftar. Unggah dokumen pertama di atas.</p>}
+   {documents.map(doc=>(
+    <div key={doc.file} className="doc-row">
+     <div style={{minWidth:0}}>
+      <b>{doc.cite}</b>
+      <div className="help">{doc.file} • {doc.chunkCount} potongan • {doc.source==="web"?"Ditambahkan admin":"Sumber dasar (notebook)"}</div>
+     </div>
+     {doc.source==="web"?(
+      <button className="btn btn-outline btn-sm" disabled={deleting===doc.file} onClick={()=>void remove(doc)}>{deleting===doc.file?"Menghapus…":"Hapus"}<span className="sr-only"> {doc.cite}</span></button>
+     ):(
+      <span className="chip">Sumber dasar</span>
+     )}
+    </div>
+   ))}
   </section>
  </AppShell>
  );
