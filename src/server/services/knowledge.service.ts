@@ -1,12 +1,4 @@
-/**
- * SISKA — Knowledge Base Domain Service & Ingestion Pipeline (`KnowledgeBaseService`)
- * Sumber otoritas:
- * - docs/01-SRS.md FR-012
- * - docs/02-ERD.md §2, §4, §6 (`knowledgeDocuments`, `knowledgeChunks`)
- * - docs/04-API-SPEC.yaml (/admin/knowledge-documents, /admin/knowledge-documents/{documentId}, /admin/knowledge-documents/reindex)
- * - docs/06-AI-ARCHITECTURE.md §3 & §4 (Ingestion pipeline: validate, SHA-256, extract, chunk, publish as indexed or mark failed)
- * - docs/09-TEST-PLAN.md KB-01, KB-02, KB-03
- */
+// Layanan Knowledge Base
 
 import { createHash } from 'node:crypto';
 import type { DocumentData } from 'firebase-admin/firestore';
@@ -57,6 +49,7 @@ export interface ExtractedPdfPageChunk {
   text: string;
 }
 
+// Serialisasi Dokumen KB
 function serializeKnowledgeDoc(
   id: string,
   data: DocumentData,
@@ -86,17 +79,13 @@ function unescapePdfLiteral(str: string): string {
     .replace(/\\t/g, ' ');
 }
 
-/**
- * Mengekstrak teks dan bagian semantik per halaman dari biner PDF (docs/06-AI-ARCHITECTURE.md §4).
- * Melempar error berkode `'PDF_PARSE_FAILED'` bila struktur PDF rusak/terpotong (mis. tanpa `%%EOF` atau tanpa halaman).
- */
+// Ekstraksi & Chunking PDF
 export function extractAndChunkPdfBytes(
   bytes: Uint8Array,
   docTitle: string,
 ): ExtractedPdfPageChunk[] {
   const rawLatin1 = Buffer.from(bytes).toString('latin1');
 
-  // Validasi integritas struktur PDF (menangkap berkas PDF terpotong seperti fixture seed_kb_gagal)
   if (
     !rawLatin1.startsWith('%PDF-') ||
     !rawLatin1.includes('%%EOF') ||
@@ -114,7 +103,6 @@ export function extractAndChunkPdfBytes(
     const streamContent = match[1] ?? '';
     const lineLiterals: string[] = [];
 
-    // Ekstrak literal teks dari operator PDF `(...) Tj` maupun array `[...] TJ`
     const tjRegex = /\((?:\\.|[^\\()])*\)\s*Tj|\[((?:\\.|[^\]])*)\]\s*TJ/g;
     let tjMatch: RegExpExecArray | null;
     while ((tjMatch = tjRegex.exec(streamContent)) !== null) {
@@ -137,7 +125,6 @@ export function extractAndChunkPdfBytes(
 
     pageNumber += 1;
 
-    // Pisahkan judul halaman dan label `Bagian: <section>` (kompatibel penuh dengan format PDF seed-data.mjs)
     let section: string | null = null;
     const bodyLines: string[] = [];
     const normalizedTitle = docTitle.replace(/[^\x20-\x7E]/g, '?').trim();
@@ -163,7 +150,6 @@ export function extractAndChunkPdfBytes(
       continue;
     }
 
-    // Semantic chunking (~500-800 kata dengan overlap ~80 kata bila satu halaman sangat panjang — docs/06-AI-ARCHITECTURE.md §4.5)
     const words = fullPageText.split(/\s+/);
     const maxWordsPerChunk = 600;
     const overlapWords = 80;
@@ -200,12 +186,7 @@ export function extractAndChunkPdfBytes(
   return pageChunks;
 }
 
-/**
- * Menjalankan proses ingestion PDF untuk suatu dokumen `knowledgeDocuments/{docId}`:
- * - Menghapus chunk versi lama (idempoten).
- * - Mengekstrak & memecah teks menjadi `knowledgeChunks/{docId}_c{NN}`.
- * - Memperbarui status dokumen ke `'indexed'` beserta `chunkCount`, atau `'failed'` (`errorCode: 'PDF_PARSE_FAILED'`) bila gagal.
- */
+// Ingest Dokumen KB
 export async function ingestKnowledgeDocumentBytes(params: {
   docId: string;
   title: string;
@@ -279,11 +260,7 @@ export async function ingestKnowledgeDocumentBytes(params: {
   }
 }
 
-/**
- * Mengambil daftar dokumen Knowledge Base beserta status pengindeksan (`GET /api/v1/admin/knowledge-documents`)
- * dengan amplop standar `{ items, nextCursor }`.
- * Hanya dapat diakses oleh Admin (KB-02).
- */
+// Daftar Dokumen KB
 export async function listKnowledgeDocuments(
   caller: AuthenticatedCaller,
 ): Promise<PaginatedKnowledgeDocumentsResult> {
@@ -302,15 +279,7 @@ export async function listKnowledgeDocuments(
   };
 }
 
-/**
- * Mengunggah PDF resmi Knowledge Base dan menjalankan pipeline ingestion (`POST /api/v1/admin/knowledge-documents`).
- * Sesuai docs/06-AI-ARCHITECTURE.md §3 & §4 serta KB-01:
- * 1. Menghitung SHA-256 biner PDF.
- * 2. Menyimpan PDF asli di Cloud Storage privat (`knowledge-base/{docId}/v1.pdf`).
- * 3. Mencatat metadata awal `knowledgeDocuments/{docId}` dengan status `'processing'` dan `auditEvents` (`kb.document_uploaded`).
- * 4. Memicu ingesti ke microservice FastAPI (`POST /admin/documents`) bila aktif, serta menjalankan ekstraksi teks & chunking
- *    sehingga status bertransisi ke `'indexed'` atau `'failed'` (`PDF_PARSE_FAILED`) tanpa pernah mandek di `'processing'`.
- */
+// Unggah Dokumen KB
 export async function uploadKnowledgeDocument(
   caller: AuthenticatedCaller,
   upload: ValidatedKnowledgePdfUpload,
@@ -323,7 +292,6 @@ export async function uploadKnowledgeDocument(
   const storagePath = `knowledge-base/${docRef.id}/v${version}.pdf`;
   const computedSha256 = createHash('sha256').update(upload.bytes).digest('hex');
   const now = new Date();
-
   const provider = resolveActiveStorageProvider();
 
   if (provider === 'cloudinary') {
@@ -392,7 +360,6 @@ export async function uploadKnowledgeDocument(
     );
   }
 
-  // 1. Pemicu Server-to-Server ke microservice FastAPI RAG bila diaktifkan (docs/06-AI-ARCHITECTURE.md §3)
   const remoteIngestion = await triggerRemoteAiDocumentIngest(
     {
       documentId: docRef.id,
@@ -422,7 +389,6 @@ export async function uploadKnowledgeDocument(
     });
   }
 
-  // 2. Jalankan pipeline ingestion lokal (transisi otomatis processing -> indexed / failed sesuai KB-01)
   const ingestionResult = await ingestKnowledgeDocumentBytes({
     docId: docRef.id,
     title: upload.title,
@@ -439,12 +405,7 @@ export async function uploadKnowledgeDocument(
   });
 }
 
-/**
- * Menghapus dokumen Knowledge Base beserta seluruh `knowledgeChunks` terkait, entri indeks FastAPI, dan berkas asli di Cloud Storage
- * (`DELETE /api/v1/admin/knowledge-documents/{documentId}`).
- * Sesuai docs/02-ERD.md §6 & KB-03:
- * Mencatat `auditEvents` (`kb.document_deleted`) yang tetap bertahan meskipun dokumen sudah dihapus.
- */
+// Hapus Dokumen KB
 export async function deleteKnowledgeDocument(
   caller: AuthenticatedCaller,
   documentId: string,
@@ -501,11 +462,7 @@ export async function deleteKnowledgeDocument(
   ]);
 }
 
-/**
- * Menjalankan pengindeksan ulang (reindex) idempoten atas dokumen Knowledge Base (`POST /api/v1/admin/knowledge-documents/reindex`).
- * Memicu endpoint `POST /admin/reindex` pada microservice FastAPI (bila aktif) serta mengunduh berkas PDF asli dari Cloud Storage / Cloudinary
- * untuk memproses ulang chunking secara aktual.
- */
+// Reindex Dokumen KB
 export async function requestKnowledgeReindex(
   caller: AuthenticatedCaller,
   requestId: string,
@@ -522,7 +479,6 @@ export async function requestKnowledgeReindex(
     requestId,
   });
 
-  // Beritahukan microservice FastAPI bila mode remote aktif (docs/06-AI-ARCHITECTURE.md §3)
   await triggerRemoteAiReindex(
     { requestedBy: adminCaller.uid },
     requestId,

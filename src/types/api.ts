@@ -1,14 +1,4 @@
-/**
- * SISKA — Standalone HTTP API Request & Response DTO Contracts (`src/types/api.ts`)
- * Sumber otoritas:
- * - docs/04-API-SPEC.yaml (OpenAPI 3.1.0 `/api/v1`)
- * - docs/05-BACKEND-ARCHITECTURE.md §3 (`types/{api,domain}/`) & §8 (Error Contract)
- *
- * Prinsip Arsitektur Bersih:
- * Modul ini berdiri 100% mandiri (hanya bergantung pada primitif `@/types/domain`)
- * dan TIDAK mengimpor dari `@/server/**`. Baik Frontend (`src/lib/api-client.ts`)
- * maupun Backend (`src/server/services/**`) mengacu pada kontrak DTO tunggal ini.
- */
+// Kontrak DTO API
 
 import type {
   AuditEventDocument,
@@ -23,10 +13,7 @@ import type {
   UserRole,
 } from '@/types/domain';
 
-/* ========================================================================== */
-/* 1. Standard Error & Envelope Contracts (docs/04-API-SPEC.yaml & §8)        */
-/* ========================================================================== */
-
+// Kontrak Error & Paginasi
 export const API_ERROR_CODES = [
   'VALIDATION_ERROR',
   'UNAUTHENTICATED',
@@ -39,31 +26,21 @@ export const API_ERROR_CODES = [
 ] as const;
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
-
-/** Rincian kesalahan validasi per-field yang aman (tanpa memantulkan nilai sensitif input) */
 export type ApiErrorFieldMap = Record<string, string>;
 
 export interface ApiErrorBody {
   code: ApiErrorCode;
   message: string;
   requestId: string;
-  /** Opsional: peta nama field -> pesan kesalahan validasi pada HTTP 400 VALIDATION_ERROR */
   fields?: ApiErrorFieldMap;
 }
 
-/**
- * Amplop respons standar untuk seluruh endpoint daftar/koleksi (`GET /reports`, `/conversations`, dll.).
- * Selaras dengan `ReportPage` pada `docs/04-API-SPEC.yaml`.
- */
 export interface PaginatedResponse<TItem> {
   items: TItem[];
   nextCursor: string | null;
 }
 
-/* ========================================================================== */
-/* 2. User Profile DTOs (`/api/v1/profile`)                                   */
-/* ========================================================================== */
-
+// DTO Profil Pengguna
 export interface SerializedUserProfile {
   uid: string;
   displayName: string;
@@ -74,10 +51,7 @@ export interface SerializedUserProfile {
   photoUrl?: string | null;
 }
 
-/* ========================================================================== */
-/* 3. Reports & Status History DTOs (`/api/v1/reports`)                       */
-/* ========================================================================== */
-
+// DTO Laporan & Riwayat
 export interface SerializedReport {
   id: string;
   reporterId: string;
@@ -123,10 +97,7 @@ export interface ReportsSummaryResult {
   byStatus: Record<ReportStatus, number>;
 }
 
-/* ========================================================================== */
-/* 4. Evidence Upload & Signed Download DTOs (`/api/v1/reports/{id}/evidence`)*/
-/* ========================================================================== */
-
+// DTO Bukti Laporan
 export interface CreateEvidenceResult {
   status: 'committed' | 'upload_pending';
   evidenceId: string;
@@ -139,26 +110,17 @@ export interface CreateEvidenceResult {
 export interface SignedDownloadUrlResult {
   url: string;
   expiresInSeconds: number;
-  /** URL pratinjau foto (JPG/PNG) dengan metadata EXIF/GPS dihapus (`fl_strip_profile`) */
   previewUrl?: string | null;
-  /** URL pratinjau foto yang diburamkan (`e_blur:1200`) untuk perlindungan trauma visual */
   blurredPreviewUrl?: string | null;
 }
 
-/* ========================================================================== */
-/* 5. Conversations & Messages DTOs (`/api/v1/conversations`)                 */
-/* ========================================================================== */
-
+// DTO Percakapan & Pesan
 export interface SerializedConversation {
   id: string;
   type: 'report_admin';
-  /** Nama field kanonis Firestore & seeder (`reporterId`) */
   reporterId: string;
-  /** Alias kompatibilitas dengan tabel docs/02-ERD.md (`reporterUid`) */
   reporterUid: string;
-  /** Nama field kanonis Firestore & seeder (`assignedAdminId`) */
   assignedAdminId: string | null;
-  /** Alias kompatibilitas dengan tabel docs/02-ERD.md (`adminUid`) */
   adminUid: string | null;
   reportId: string | null;
   status: ConversationStatus;
@@ -167,7 +129,6 @@ export interface SerializedConversation {
   lastMessage?: string | null;
   lastMessageSenderUid?: string | null;
   lastMessageAt?: string | null;
-  /** Jumlah pesan masuk yang belum dibaca oleh caller. */
   unreadCount: number;
 }
 
@@ -180,16 +141,12 @@ export interface SerializedMessage {
   body: string;
   createdAt: string;
   attachmentPath: string | null;
-  /** true jika penerima telah membuka percakapan setelah pesan ini dikirim. */
   readByRecipient: boolean;
 }
 
 export type PaginatedMessagesResult = PaginatedResponse<SerializedMessage>;
 
-/* ========================================================================== */
-/* 6. SISKA AI Assistant DTOs (`/api/v1/ai/chat`)                             */
-/* ========================================================================== */
-
+// DTO Asisten AI
 export interface AiCitationSource {
   documentId: string;
   title: string;
@@ -210,10 +167,7 @@ export interface SerializedAiRagDocument {
   source: 'notebook' | 'web';
 }
 
-/* ========================================================================== */
-/* 7. Admin Knowledge Base & Audit DTOs (`/api/v1/admin/*`)                   */
-/* ========================================================================== */
-
+// DTO Knowledge Base & Audit
 export interface SerializedKnowledgeDocument {
   id: string;
   title: string;
@@ -251,10 +205,7 @@ export interface SerializedAuditEvent {
 
 export type PaginatedAuditEventsResult = PaginatedResponse<SerializedAuditEvent>;
 
-/* ========================================================================== */
-/* 8. Education Materials DTOs (`/api/v1/education`, `/api/v1/admin/education`) */
-/* ========================================================================== */
-
+// DTO Materi Edukasi
 export interface SerializedEducationItem {
   id: string;
   slug: string;
@@ -275,10 +226,7 @@ export interface SerializedEducationItem {
 
 export type PaginatedEducationResult = PaginatedResponse<SerializedEducationItem>;
 
-/* ========================================================================== */
-/* 9. In-App Notifications DTOs (`/api/v1/notifications`, `/api/v1/admin/notifications`) */
-/* ========================================================================== */
-
+// DTO Notifikasi In-App
 export interface SerializedNotificationItem {
   id: string;
   recipientUid: string;
@@ -306,4 +254,3 @@ export interface BroadcastNotificationResult {
   targetRole: string;
   requestId: string;
 }
-

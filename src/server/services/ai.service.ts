@@ -1,11 +1,4 @@
-/**
- * SISKA — AI RAG Gateway & Guardrail Service (`AiGatewayService`)
- * Sumber otoritas:
- * - docs/01-SRS.md FR-011, NFR-PRIV-02, NFR-AI-01
- * - docs/04-API-SPEC.yaml (/ai/chat)
- * - docs/06-AI-ARCHITECTURE.md §1–§6
- * - docs/09-TEST-PLAN.md AI-01..AI-05, REL-01
- */
+// Layanan Gateway AI
 
 import { getAdminDb } from '@/lib/firebase/admin';
 import { requireRole } from '@/server/authz/permissions';
@@ -20,7 +13,7 @@ import type {
 
 export type { AiChatResponse, AiCitationSource };
 
-/** Pola deteksi upaya Prompt Injection pada pertanyaan maupun di dalam teks chunk dokumen (AI-03) */
+// Pola Prompt Injection
 const PROMPT_INJECTION_PATTERNS = [
   /abaikan\s+(semua\s+)?instruksi/i,
   /ignore\s+(all\s+)?(previous|prior)\s+instructions/i,
@@ -30,9 +23,7 @@ const PROMPT_INJECTION_PATTERNS = [
   /kredensial\s+sistem/i,
 ];
 
-/**
- * Pola deteksi permintaan data kasus/laporan pribadi secara generik tanpa bergantung pada nama fixture uji (AI-04 & NFR-PRIV-02)
- */
+// Pola Data Pribadi
 const PRIVATE_CASE_DATA_PATTERNS = [
   /isi\s+laporan\s+(saya|orang\s+lain|pelapor)/i,
   /\b(?:rpt|report|laporan)[_-][a-z0-9_-]{2,}/i,
@@ -41,7 +32,7 @@ const PRIVATE_CASE_DATA_PATTERNS = [
   /data\s+laporan\s+pengguna/i,
 ];
 
-/** Daftar kata umum (stopwords) Bahasa Indonesia agar tidak memicu kecocokan palsu pada Relevance Gate */
+// Stopwords Bahasa Indonesia
 const INDONESIAN_STOPWORDS = new Set([
   'apa',
   'apakah',
@@ -86,7 +77,7 @@ const INDONESIAN_STOPWORDS = new Set([
   'yang',
 ]);
 
-/** Pola deteksi kondisi darurat / keselamatan mendesak (AI-05) */
+// Pola Kondisi Darurat
 const EMERGENCY_SAFETY_PATTERNS = [
   /darurat/i,
   /bahaya\s+sekarang/i,
@@ -100,18 +91,7 @@ function containsPattern(text: string, patterns: readonly RegExp[]): boolean {
   return patterns.some((re) => re.test(text));
 }
 
-/**
- * Memproses pertanyaan informasi umum ke SISKA AI (`POST /api/v1/ai/chat`).
- *
- * Kontrol Keamanan Mutlak (docs/06-AI-ARCHITECTURE.md & 09-TEST-PLAN.md):
- * 1. TIDAK PERNAH membaca koleksi `reports`, `evidence`, atau `conversations` (NFR-PRIV-02 & AI-04).
- * 2. Menolak upaya prompt injection pada pertanyaan pengguna maupun di dalam chunk dokumen (AI-03).
- * 3. Memberikan panduan eskalasi terverifikasi tanpa mengarang nomor kontak saat terdeteksi kondisi darurat (AI-05).
- * 4. Jika AI Service eksternal (`AI_SERVICE_URL`) dikonfigurasi dan aktif, meneruskan hanya pertanyaan
- *    yang sudah lolos filter dengan batas waktu ketat (`REL-01`). Jika tidak terjangkau/belum jalan,
- *    melakukan retrieval terverifikasi langsung dari koleksi `knowledgeDocuments` (`status == 'indexed'`)
- *    dan `knowledgeChunks` di Firestore, atau menyatakan abstain (`grounded: false`) bila bukti tidak cukup (`AI-02`).
- */
+// Pemrosesan Pertanyaan AI
 export async function answerGeneralQuestion(
   caller: AuthenticatedCaller,
   input: AiChatInput,
@@ -120,7 +100,7 @@ export async function answerGeneralQuestion(
   requireRole(caller, ['reporter', 'admin']);
   const queryText = input.message.trim();
 
-  // 1. Guardrail Prompt Injection & Akses Data Laporan Pribadi (AI-03 & AI-04)
+  // Filter Keamanan Input
   if (
     containsPattern(queryText, PROMPT_INJECTION_PATTERNS) ||
     containsPattern(queryText, PRIVATE_CASE_DATA_PATTERNS)
@@ -135,8 +115,7 @@ export async function answerGeneralQuestion(
   }
   const isEmergency = containsPattern(queryText, EMERGENCY_SAFETY_PATTERNS);
 
-  // 2. Coba panggil AI RAG Service melalui kontrak server-to-server jika diaktifkan (REL-01).
-  // Pertanyaan darurat juga perlu mencapai RAG agar kontak resmi terverifikasi dapat diberikan.
+  // Panggilan Layanan RAG
   const remoteResponse = await callRemoteAiChat(
     {
       message: queryText,
@@ -157,7 +136,7 @@ export async function answerGeneralQuestion(
     };
   }
 
-  // 3. Jika RAG remote tidak tersedia, jangan mengarang nomor atau menyajikan placeholder kontak.
+  // Fallback Kondisi Darurat
   if (isEmergency) {
     return {
       answer:
@@ -169,7 +148,7 @@ export async function answerGeneralQuestion(
     };
   }
 
-  // 4. Retrieval Terverifikasi terhadap `knowledgeDocuments` (status == 'indexed') & `knowledgeChunks`
+  // Retrieval Lokal Firestore
   const db = getAdminDb();
   const indexedDocsSnap = await db
     .collection('knowledgeDocuments')
@@ -220,7 +199,6 @@ export async function answerGeneralQuestion(
     const parentDoc = approvedDocs.get(chunk.documentId);
     if (!parentDoc) continue;
 
-    // Sanitasi murni berbasis konten chunk terhadap instruksi prompt injection yang tersembunyi di dalam PDF (AI-03)
     if (containsPattern(chunk.text, PROMPT_INJECTION_PATTERNS)) {
       continue;
     }
@@ -234,9 +212,6 @@ export async function answerGeneralQuestion(
     }
 
     const coverage = queryTokens.length > 0 ? score / queryTokens.length : 0;
-
-    // Relevance / Confidence Gate (docs/06-AI-ARCHITECTURE.md §2):
-    // Hanya terima chunk bila minimal 2 kata kunci bermakna cocok ATAU cakupan >= 34% dari kata kunci bermakna
     const meetsRelevanceGate =
       queryTokens.length > 0 && (score >= 2 || coverage >= 0.34);
 
@@ -253,7 +228,7 @@ export async function answerGeneralQuestion(
   scored.sort((a, b) => b.score - a.score);
   const topMatches = scored.slice(0, 2);
 
-  // 5. Abstention Gate jika tidak ada bagian dokumen resmi yang relevan (AI-02 & NFR-AI-01)
+  // Gerbang Abstention
   if (topMatches.length === 0) {
     return {
       answer:

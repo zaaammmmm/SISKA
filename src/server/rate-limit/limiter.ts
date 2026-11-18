@@ -1,22 +1,14 @@
-/**
- * SISKA — Server-Side Rate Limiter (`RateLimitService`)
- * Sumber otoritas:
- * - docs/05-BACKEND-ARCHITECTURE.md §2.2, §3, §5 ("Rate limit login, create report, messages, AI, upload, dan admin operations")
- * - docs/04-API-SPEC.yaml (responses/RateLimited + header Retry-After)
- * - docs/01-SRS.md NFR-SEC-03
- */
+// Pembatas Laju Permintaan
 
 import { ApiError } from '@/server/errors/api-error';
 
 export interface RateLimitRule {
-  /** Nama bucket aksi (mis. 'report:create', 'ai:chat') */
   action: string;
-  /** Jumlah maksimum permintaan dalam jendela waktu */
   maxRequests: number;
-  /** Durasi jendela waktu dalam milidetik */
   windowMs: number;
 }
 
+// Kebijakan Rate Limit
 export const RATE_LIMIT_POLICIES = {
   CREATE_REPORT: {
     action: 'report:create',
@@ -51,10 +43,7 @@ interface WindowEntry {
 
 const buckets = new Map<string, WindowEntry>();
 
-/**
- * Memeriksa dan mencatat pemakaian kuota laju permintaan per kunci aktor (`uid` atau IP).
- * Melempar `429 RATE_LIMITED` beserta header `Retry-After` jika batas terlampaui.
- */
+// Pemeriksaan Kuota Permintaan
 export function enforceRateLimit(subjectKey: string, rule: RateLimitRule): void {
   const now = Date.now();
   const windowStart = now - rule.windowMs;
@@ -75,4 +64,3 @@ export function enforceRateLimit(subjectKey: string, rule: RateLimitRule): void 
   validTimestamps.push(now);
   buckets.set(mapKey, { timestamps: validTimestamps });
 }
-

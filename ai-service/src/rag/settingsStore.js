@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { SETTINGS_FILE as FILE } from '../config.js';
-// Nilai awal dari env; berkas data/runtime-settings.json (diubah lewat /admin/settings) menimpanya.
+// Pengaturan Runtime
 const defaults = () => ({
     backend: process.env.OLLAMA_BACKEND === 'colab' ? 'colab' : 'local',
     colabUrl: process.env.OLLAMA_COLAB_URL || '',
@@ -14,7 +14,7 @@ export function getSettings() {
         }
     }
     catch {
-        // ignore, fall back to default
+        // Fallback default
     }
     return defaults();
 }

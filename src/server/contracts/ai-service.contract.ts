@@ -1,25 +1,10 @@
-/**
- * SISKA — Server-to-Server AI Service Integration Contract (Node.js RAG Service)
- * Sumber otoritas:
- * - docs/05-BACKEND-ARCHITECTURE.md §2 & §9 (AI service dipanggil server-to-server; health check, timeout, fallback)
- * - docs/06-AI-ARCHITECTURE.md §3 (Service endpoints), §4 (Ingestion pipeline), §8 (Configuration)
- * - docs/09-TEST-PLAN.md REL-01 (Bounded timeout & graceful fallback)
- *
- * File ini menjadi kontrak integrasi antara backend SISKA dan layanan RAG:
- * 1. Seluruh request dari Next.js Backend menyertakan header:
- *    - `X-Request-Id`: ID korelasi request untuk audit/tracing.
- *    - `X-Service-Authorization`: Nilai `AI_SERVICE_SHARED_SECRET` (wajib divalidasi oleh layanan AI).
- * 2. AI Service TIDAK BOLEH mengakses koleksi `reports`, `evidence`, atau `conversations`.
- */
+// Kontrak Integrasi AI
 
 import type { AiCitationSource } from '@/types/api';
 import type { KBDocumentStatus } from '@/types/domain';
 import { ApiError } from '@/server/errors/api-error';
 
-/* ========================================================================== */
-/* 1. Endpoint & Header Constants (docs/06-AI-ARCHITECTURE.md §3)             */
-/* ========================================================================== */
-
+// Konstanta Endpoint & Header
 export const AI_SERVICE_ENDPOINTS = {
   HEALTH: '/health',
   CHAT: '/chat',
@@ -35,24 +20,18 @@ export const AI_SERVICE_HEADERS = {
   SERVICE_AUTH: 'X-Service-Authorization',
 } as const;
 
-/* ========================================================================== */
-/* 2. Payload Contracts (Next.js Backend <-> AI RAG Service)                 */
-/* ========================================================================== */
-
-/** `GET /health` response tanpa mengekspos secret atau environment */
+// Kontrak Payload AI
 export interface AiServiceHealthResponse {
   status: 'ok' | 'degraded';
   embeddingModelLoaded?: boolean;
 }
 
-/** `POST /chat` request body dari Next.js Backend ke AI Service */
 export interface AiServiceChatRequest {
   message: string;
   conversationId?: string | null;
   userId?: string;
 }
 
-/** `POST /chat` response body dari AI Service ke Next.js Backend */
 export interface AiServiceChatResponse {
   answer: string;
   grounded: boolean;
@@ -79,7 +58,6 @@ export interface AiServiceRagDocumentResult {
   removedChunks?: number;
 }
 
-/** `POST /admin/documents` request metadata untuk antrean indexing PDF */
 export interface AiServiceDocumentIngestRequest {
   documentId: string;
   title: string;
@@ -89,7 +67,6 @@ export interface AiServiceDocumentIngestRequest {
   uploadedBy: string;
 }
 
-/** `POST /admin/documents` & `GET /admin/documents` item status */
 export interface AiServiceDocumentStatusItem {
   documentId: string;
   status: KBDocumentStatus;
@@ -97,7 +74,6 @@ export interface AiServiceDocumentStatusItem {
   errorCode?: string | null;
 }
 
-/** `POST /admin/reindex` request & response */
 export interface AiServiceReindexRequest {
   documentIds?: string[];
   requestedBy: string;
@@ -108,10 +84,7 @@ export interface AiServiceReindexResponse {
   queuedCount: number;
 }
 
-/* ========================================================================== */
-/* 3. Runtime Configuration & Server-to-Server Client Adapter                 */
-/* ========================================================================== */
-
+// Konfigurasi Runtime AI
 export interface AiServiceRuntimeConfig {
   enabled: boolean;
   baseUrl: string | null;
@@ -119,10 +92,6 @@ export interface AiServiceRuntimeConfig {
   timeoutMs: number;
 }
 
-/**
- * Membaca konfigurasi runtime AI Service dari environment server.
- * Saat layanan remote nonaktif atau tidak tersedia, backend menggunakan Firestore-backed RAG.
- */
 export function resolveAiServiceConfig(): AiServiceRuntimeConfig {
   const baseUrl = process.env.AI_SERVICE_URL?.trim() || null;
   const remoteFlag = process.env.AI_SERVICE_ENABLE_REMOTE?.trim().toLowerCase();
@@ -155,6 +124,7 @@ function buildServiceHeaders(
   };
 }
 
+// Client HTTP AI
 async function requestAiService<TResponse>(
   endpoint: string,
   requestId: string,
@@ -217,6 +187,7 @@ async function requestAiService<TResponse>(
   return body as TResponse;
 }
 
+// Daftar Dokumen RAG
 export async function listRemoteAiRagDocuments(
   requestId: string,
 ): Promise<AiServiceRagDocument[]> {
@@ -245,6 +216,7 @@ export async function listRemoteAiRagDocuments(
   return body.docs as AiServiceRagDocument[];
 }
 
+// Tambah Dokumen RAG
 export async function addRemoteAiRagDocument(
   payload: AiServiceRagDocumentInput,
   requestId: string,
@@ -263,6 +235,7 @@ export async function addRemoteAiRagDocument(
   return body;
 }
 
+// Hapus Dokumen RAG
 export async function deleteRemoteAiRagDocument(
   file: string,
   requestId: string,
@@ -281,11 +254,7 @@ export async function deleteRemoteAiRagDocument(
   return body;
 }
 
-/**
- * Memanggil `POST /chat` pada AI RAG Service dengan batas waktu terkontrol (`REL-01`).
- * Mengembalikan `null` bila remote service dinonaktifkan atau gagal/timeout,
- * sehingga `ai.service.ts` dapat melakukan fallback aman ke Firestore RAG.
- */
+// Panggilan Chat AI
 export async function callRemoteAiChat(
   payload: AiServiceChatRequest,
   requestId: string,
@@ -326,11 +295,7 @@ export async function callRemoteAiChat(
   }
 }
 
-/**
- * Memicu proses ingesti/embedding dokumen PDF baru ke AI Service (`POST /admin/documents`).
- * Mengembalikan `null` bila remote AI service dinonaktifkan atau tidak terjangkau,
- * sehingga `knowledge.service.ts` tetap menjalankan pipeline ingesti lokal sebagai fallback.
- */
+// Ingest Dokumen Remote
 export async function triggerRemoteAiDocumentIngest(
   payload: AiServiceDocumentIngestRequest,
   requestId: string,
@@ -371,9 +336,7 @@ export async function triggerRemoteAiDocumentIngest(
   }
 }
 
-/**
- * Memberitahukan AI Service untuk menghapus indeks vektor dan cache dokumen (`DELETE /admin/documents/{id}`).
- */
+// Hapus Dokumen Remote
 export async function triggerRemoteAiDocumentDelete(
   documentId: string,
   requestId: string,
@@ -398,9 +361,7 @@ export async function triggerRemoteAiDocumentDelete(
   }
 }
 
-/**
- * Memicu job reindex idempoten pada AI Service (`POST /admin/reindex`).
- */
+// Reindex Dokumen Remote
 export async function triggerRemoteAiReindex(
   payload: AiServiceReindexRequest,
   requestId: string,
@@ -435,9 +396,7 @@ export async function triggerRemoteAiReindex(
   }
 }
 
-/**
- * Memeriksa kesiapan (`GET /health`) AI RAG Service tanpa membocorkan secret.
- */
+// Cek Kesehatan AI
 export async function probeRemoteAiHealth(
   requestId: string,
 ): Promise<{ reachable: boolean; status: string }> {

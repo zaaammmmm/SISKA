@@ -1,9 +1,4 @@
-/**
- * SISKA — Server Authentication & Authorization Barrel (`src/server/authz`)
- * Sumber otoritas:
- * - docs/05-BACKEND-ARCHITECTURE.md §3 (`server/authz/`) & §4
- * - docs/08-AUTHORIZATION-MATRIX.md
- */
+// Ekspor Modul Otorisasi
 
 export {
   type AuthenticatedCaller,
@@ -30,4 +25,3 @@ export {
   withAuthenticatedRoute,
   withVerifiedTokenRoute,
 } from '@/server/authz/route-handler';
-

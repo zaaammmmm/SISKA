@@ -33,7 +33,7 @@ export interface SendMessageInput {
 
 const CREATE_CONVERSATION_ALLOWED_KEYS = ['reportId'] as const;
 
-// Validasi Input Pembuatan Percakapan
+// Validasi Pembuatan Percakapan
 export function validateCreateConversationInput(
   payload: Record<string, unknown>,
 ): CreateConversationInput {
@@ -58,7 +58,7 @@ export function validateCreateConversationInput(
 
 const SEND_MESSAGE_ALLOWED_KEYS = ['body', 'attachment'] as const;
 
-// Validasi Input Pengiriman Pesan (JSON)
+// Validasi Pesan JSON
 export function validateSendMessageInput(
   payload: Record<string, unknown>,
 ): SendMessageInput {
@@ -112,7 +112,7 @@ export function validateSendMessageInput(
   };
 }
 
-// Validasi Input Pengiriman Pesan Beserta Lampiran Foto/Berkas (Multipart FormData)
+// Validasi Pesan Multipart
 export async function validateMultipartSendMessageInput(
   formData: FormData,
 ): Promise<SendMessageInput> {
@@ -179,7 +179,7 @@ export interface UpdateConversationAdminInput {
   status?: 'open' | 'closed';
 }
 
-// Validasi Pembaruan Percakapan Admin
+// Validasi Percakapan Admin
 export function validateUpdateConversationAdminInput(
   payload: Record<string, unknown>,
 ): UpdateConversationAdminInput {

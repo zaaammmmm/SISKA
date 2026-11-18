@@ -1,10 +1,4 @@
-/**
- * SISKA — Server Audit Module (`src/server/audit`)
- * Sumber otoritas:
- * - docs/01-SRS.md FR-013, NFR-OBS-01
- * - docs/02-ERD.md §4 (`auditEvents`)
- * - docs/05-BACKEND-ARCHITECTURE.md §3 (`server/audit/`)
- */
+// Ekspor Modul Audit
 
 export {
   type AuditAction,
@@ -17,4 +11,3 @@ export {
   recordAuditEvent,
   listAuditEvents,
 } from '@/server/services/audit.service';
-

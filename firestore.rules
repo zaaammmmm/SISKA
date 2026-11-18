@@ -2,14 +2,11 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ------------------------------------------------------------------
-    // Identitas dan role
-    // ------------------------------------------------------------------
+    // Identitas dan Role
     function signedIn() {
       return request.auth != null;
     }
 
-    // Role yang valid pada Custom Claims adalah otoritas utama.
     function hasValidRoleClaim() {
       return signedIn() && (
         request.auth.token.get('role', '') == 'reporter' ||
@@ -21,9 +18,6 @@ service cloud.firestore {
       return signedIn() && request.auth.token.get('role', '') == 'admin';
     }
 
-    // Konsisten dengan verifyBearerToken(): profil hanya menjadi fallback
-    // reporter jika token belum memiliki claim role SISKA yang valid.
-    // Claim admin tidak pernah diturunkan menjadi reporter melalui profil.
     function isReporter() {
       return signedIn() && (
         request.auth.token.get('role', '') == 'reporter' ||
@@ -35,12 +29,7 @@ service cloud.firestore {
       );
     }
 
-    // ------------------------------------------------------------------
-    // Akses baca percakapan
-    // ------------------------------------------------------------------
-    // reporterId dan assignedAdminId adalah field kanonis.
-    // reporterUid/adminUid hanya fallback untuk dokumen legacy jika field
-    // kanonis sama sekali tidak ada. Alias yang berkonflik tidak memberi akses.
+    // Akses Baca Percakapan
     function isConversationReporter(convData) {
       return isReporter() && (
         (
@@ -96,39 +85,24 @@ service cloud.firestore {
       );
     }
 
-    // Kepemilikan laporan untuk pembacaan metadata subkoleksi.
+    // Kepemilikan Laporan
     function isReportOwner(reportId) {
       return isReporter() &&
         exists(/databases/$(database)/documents/reports/$(reportId)) &&
         get(/databases/$(database)/documents/reports/$(reportId)).data.get('reporterId', '') == request.auth.uid;
     }
 
-    // ------------------------------------------------------------------
-    // users/{uid}
-    // ------------------------------------------------------------------
+    // Koleksi Users
     match /users/{uid} {
-      // Get satu profil: pemilik sendiri atau admin. Listing profil massal
-      // dari Client SDK ditutup; kebutuhan operasional melalui backend.
       allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
       allow list: if false;
-
-      // Semua mutasi profil/provisioning melewati API + Firebase Admin SDK.
-      // Client tidak boleh mengubah role, email, UID, maupun metadata sistem.
       allow create, update, delete: if false;
     }
 
-    // ------------------------------------------------------------------
-    // reports/{reportId}
-    // ------------------------------------------------------------------
+    // Koleksi Reports
     match /reports/{reportId} {
-      // Kebijakan saat ini: reporter hanya membaca miliknya; admin dengan
-      // Custom Claim admin dapat membaca semua laporan. Cakupan admin menjadi
-      // keputusan kebijakan SEC-F03 dan harus disetujui tim sebelum produksi.
       allow get, list: if isAdmin() ||
         (isReporter() && resource.data.get('reporterId', '') == request.auth.uid);
-
-      // Pembuatan/perubahan/penghapusan hanya melalui ReportService. Service
-      // mengatur validasi, transaksi statusHistory, serta auditEvents.
       allow create, update, delete: if false;
 
       match /evidence/{evidenceId} {
@@ -142,31 +116,20 @@ service cloud.firestore {
       }
     }
 
-    // ------------------------------------------------------------------
-    // conversations/{conversationId} dan messages
-    // ------------------------------------------------------------------
+    // Koleksi Conversations
     match /conversations/{conversationId} {
       allow get, list: if isConversationParticipant(resource.data);
-
-      // Buat, assign/claim admin, close/reopen, dan perubahan lain dilakukan
-      // oleh ConversationService melalui API + Admin SDK dalam transaksi.
       allow create, update, delete: if false;
 
       match /messages/{messageId} {
         allow get, list: if isConversationParticipant(
           get(/databases/$(database)/documents/conversations/$(conversationId)).data
         );
-
-        // Pengiriman pesan harus melalui API agar pemeriksaan mode 'send',
-        // rate limit, sender dari token, status, claim admin, transaksi dan
-        // audit backend tidak dapat dilewati oleh Client SDK.
         allow create, update, delete: if false;
       }
     }
 
-    // ------------------------------------------------------------------
-    // Knowledge Base dan audit
-    // ------------------------------------------------------------------
+    // Knowledge Base & Audit
     match /knowledgeDocuments/{documentId} {
       allow get, list: if isAdmin();
       allow create, update, delete: if false;
@@ -182,7 +145,7 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
-    // Default-deny untuk seluruh koleksi/path Firestore yang tidak disebut.
+    // Default Deny
     match /{document=**} {
       allow read, write: if false;
     }

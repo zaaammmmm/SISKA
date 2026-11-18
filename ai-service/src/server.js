@@ -1,18 +1,4 @@
-/**
- * SISKA AI Service -- server HTTP RAG tanpa dependensi (hanya modul bawaan Node >= 18).
- *
- * Mengimplementasikan kontrak server-to-server SISKA
- * (src/server/contracts/ai-service.contract.ts):
- *   GET    /health
- *   POST   /chat                 { message, conversationId?, userId? } -> { answer, grounded, sources, escalationMessage }
- * Tambahan khusus layanan ini (konten .md/.txt/.pdf yang sudah diekstrak):
- *   GET    /admin/rag-docs
- *   POST   /admin/rag-docs       { file, cite, content }
- *   DELETE /admin/rag-docs?file=
- *   GET    /admin/settings       POST /admin/settings { backend, colabUrl }
- *   POST   /admin/reindex
- * Semua endpoint selain /health wajib menyertakan header X-Service-Authorization.
- */
+// Server HTTP AI
 import http from 'node:http';
 import crypto from 'node:crypto';
 import {
@@ -53,6 +39,7 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ha, hb);
 }
 
+// Verifikasi Shared Secret
 function assertAuthorized(req) {
   if (!SHARED_SECRET) {
     if (ALLOW_NO_AUTH) return;
@@ -64,6 +51,7 @@ function assertAuthorized(req) {
   }
 }
 
+// Pembacaan Body JSON
 async function readJson(req) {
   const chunks = [];
   let size = 0;
@@ -82,12 +70,13 @@ async function readJson(req) {
   }
 }
 
-/** Identitas untuk rate limit: pakai userId dari SISKA bila ada, selain itu satu bucket bersama. */
+// Kunci Identitas Pengguna
 function userKey(body) {
   const raw = typeof body.userId === 'string' ? body.userId.trim() : '';
   return /^[a-zA-Z0-9_.:-]{1,128}$/.test(raw) ? raw : 'anonymous';
 }
 
+// Handler Endpoint Chat
 async function handleChat(req, requestId) {
   const body = await readJson(req);
   const message = typeof body.message === 'string' ? body.message : '';
@@ -109,7 +98,6 @@ async function handleChat(req, requestId) {
 
   const result = await answer(message, sessions.get(key), user, settings.backend, baseUrl);
 
-  // Log internal (tidak dikirim ke pengguna): rute, backend, latensi.
   console.log(JSON.stringify({
     t: new Date().toISOString(), requestId, route: result.route,
     backend: result.backend, latencyS: result.latency, grounded: result.sources.length > 0,
@@ -117,13 +105,13 @@ async function handleChat(req, requestId) {
   }));
 
   if (result.route === 'llm_error') {
-    // Biarkan SISKA melakukan fallback aman (REL-01) alih-alih menampilkan pesan error mentah.
     throw new HttpError(503, 'LLM_UNAVAILABLE', 'Model bahasa tidak terjangkau.');
   }
   sessions.set(key, result.history);
   return toContractResponse(result);
 }
 
+// Handler Endpoint Health
 async function handleHealth() {
   let indexOk = true;
   let chunkCount = 0;
@@ -131,7 +119,6 @@ async function handleHealth() {
   const settings = getSettings();
   let ollama = { up: false };
   try { ollama = await pingOllama(resolveBaseUrl(settings)); } catch (e) { ollama = { up: false, error: String(e.message || e) }; }
-  // Tanpa secret/env/URL internal pada respons.
   return {
     status: indexOk && ollama.up ? 'ok' : 'degraded',
     indexLoaded: indexOk,
@@ -141,6 +128,7 @@ async function handleHealth() {
   };
 }
 
+// Routing Request HTTP
 async function route(req, res, requestId) {
   const url = new URL(req.url, 'http://localhost');
   const { pathname } = url;
@@ -198,14 +186,14 @@ async function route(req, res, requestId) {
     }
   }
 
-  // Muat ulang artefak export dari disk (setelah menyalin hasil notebook yang baru).
+  // Reindex Artefak Export
   if (m === 'POST' && pathname === '/admin/reindex') {
     loadIndex(true);
     invalidateRetrievalCache();
     return send(res, 200, { accepted: true, queuedCount: 0 }, requestId);
   }
 
-  // Endpoint dokumen PDF lama memakai pipeline Knowledge Base SISKA, bukan indeks chat RAG.
+  // Fallback Ingest PDF
   if (pathname.startsWith('/admin/documents')) {
     throw new HttpError(501, 'NOT_IMPLEMENTED', 'Ingest PDF ditangani oleh SISKA (fallback lokal).');
   }

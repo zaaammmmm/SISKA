@@ -1,19 +1,4 @@
-/**
- * SISKA — Server-Side Cloudinary Storage & Media Transformation Adapter (`src/lib/cloudinary/index.ts`)
- * Sumber otoritas:
- * - docs/01-SRS.md FR-007, NFR-SEC-02, NFR-SEC-03, NFR-REL-01
- * - docs/04-API-SPEC.yaml (/reports/{reportId}/evidence, Signed URL <= 300s)
- * - docs/05-BACKEND-ARCHITECTURE.md §4.6 & §5
- * - docs/12-DATA-CLASSIFICATION.md (K1 Bukti & Chat Privat, K2 Profil, K4 Edukasi Publik)
- * - docs/13-SECURITY-REVIEW-FINDINGS.md (SEC-F05, SEC-F06, SEC-F07, SEC-F11)
- *
- * Fitur Utama:
- * 1. Murni Server-Side (Node.js `crypto` + `fetch` standar, tanpa membocorkan API Secret ke browser).
- * 2. Mendukung mode Private/Authenticated (`type: 'private'`) untuk bukti K1 & lampiran chat.
- * 3. Menghasilkan Signed Download URL berumur singkat (<= 300 detik) dengan `attachment=true` (SEC-F07).
- * 4. Menghasilkan Signed Preview URL dengan pembersihan EXIF/GPS (`fl_strip_profile`) dan mode blur (`e_blur:1200`).
- * 5. Mendukung Compensating Delete (`destroy`) untuk rollback otomatis saat transaksi Firestore gagal (FILE-04).
- */
+// Adapter Penyimpanan Cloudinary
 
 import { createHash } from 'node:crypto';
 import { isFirebaseEmulatorMode } from '@/lib/firebase/admin';
@@ -41,9 +26,7 @@ export interface CloudinaryConfig {
   uploadFolder: string;
 }
 
-/**
- * Membaca konfigurasi Cloudinary dari environment server.
- */
+// Konfigurasi Cloudinary
 export function resolveCloudinaryConfig(): CloudinaryConfig {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim() || '';
   const apiKey = process.env.CLOUDINARY_API_KEY?.trim() || '';
@@ -63,13 +46,7 @@ export function resolveCloudinaryConfig(): CloudinaryConfig {
   };
 }
 
-/**
- * Menentukan provider penyimpanan berkas aktif (`'cloudinary'` atau `'firebase'`).
- * - Jika `STORAGE_PROVIDER="cloudinary"`, memaksa penggunaan Cloudinary.
- * - Jika `STORAGE_PROVIDER="firebase"`, memaksa penggunaan Firebase Storage.
- * - Default (`auto`): menggunakan Cloudinary jika kredensial Cloudinary terpasang
- *   dan tidak sedang berada di mode Firebase Emulator; selebihnya menggunakan Firebase Storage.
- */
+// Resolusi Storage Provider
 export function resolveActiveStorageProvider(): StorageProviderMode {
   const explicitProvider = process.env.STORAGE_PROVIDER?.trim().toLowerCase();
   const cloudinaryCfg = resolveCloudinaryConfig();
@@ -95,12 +72,7 @@ export function resolveActiveStorageProvider(): StorageProviderMode {
   return 'firebase';
 }
 
-/**
- * Menentukan `resource_type` Cloudinary berdasarkan MIME type.
- * Catatan penting untuk Cloudinary Free Tier:
- * Berkas PDF disimpan sebagai `raw` agar pengunduhan tidak diblokir oleh batasan
- * default PDF-as-image pada akun Cloudinary gratis, sedangkan JPG/PNG menggunakan `image`.
- */
+// Pemetaan Tipe Resource
 export function cloudinaryResourceTypeForMime(
   contentType: EvidenceContentType | string,
 ): CloudinaryResourceType {
@@ -110,10 +82,7 @@ export function cloudinaryResourceTypeForMime(
   return 'image';
 }
 
-/**
- * Menormalkan path objek internal SISKA (mis. `reports/rpt_1/evidence/ev_1.jpg`)
- * menjadi `public_id` dan `format` untuk Cloudinary.
- */
+// Normalisasi Public ID
 export function toCloudinaryPublicId(
   storagePath: string,
   contentType?: string,
@@ -143,8 +112,6 @@ export function toCloudinaryPublicId(
   const resourceType = cloudinaryResourceTypeForMime(inferredMime);
 
   const baseId = prefix ? `${prefix}/${pathWithoutExt}` : pathWithoutExt;
-
-  // Untuk resource_type 'raw' di Cloudinary, public_id menyertakan ekstensi (.pdf)
   const publicId =
     resourceType === 'raw' && ext ? `${baseId}.${ext}` : baseId;
 
@@ -155,10 +122,7 @@ export function toCloudinaryPublicId(
   };
 }
 
-/**
- * Menghasilkan signature SHA-1 heksadesimal sesuai spesifikasi autentikasi Cloudinary REST API.
- * Parameter diurutkan alfabetis berdasarkan key, digabung `key=value&...`, lalu ditambah `apiSecret`.
- */
+// Signature Parameter API
 export function signCloudinaryParams(
   params: Record<string, string | number | boolean | undefined | null>,
   apiSecret: string,
@@ -177,10 +141,7 @@ export function signCloudinaryParams(
     .digest('hex');
 }
 
-/**
- * Menghasilkan token tanda tangan pendek `s--XXXXXXXX--` (8 karakter base64url SHA-1)
- * untuk Signed Delivery URL transformasi gambar Cloudinary (`res.cloudinary.com`).
- */
+// Signature Delivery URL
 export function signCloudinaryDeliveryPath(
   pathToSign: string,
   apiSecret: string,
@@ -201,14 +162,7 @@ export interface CloudinarySignedDownloadResult {
   blurredPreviewUrl: string | null;
 }
 
-/**
- * Membangun Signed Download URL berumur singkat (maksimal 300 detik / 5 menit)
- * melalui endpoint `/v1_1/{cloud_name}/{resource_type}/download` milik Cloudinary:
- * - Menegakkan `expires_at` di sisi server Cloudinary.
- * - Menambahkan `attachment=true` untuk memaksa `Content-Disposition: attachment` (Menutup SEC-F07).
- * - Untuk berkas foto (`image/jpeg`, `image/png`), menyertakan `previewUrl` (dengan `fl_strip_profile`
- *   penghapus EXIF/GPS) dan `blurredPreviewUrl` (`e_blur:1200`) untuk pratinjau aman.
- */
+// Pembuatan Signed Download URL
 export function buildCloudinarySignedDownloadUrl(params: {
   storagePath: string;
   contentType?: string;
@@ -259,8 +213,6 @@ export function buildCloudinarySignedDownloadUrl(params: {
 
   const downloadUrl = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cfg.cloudName)}/${resourceType}/download?${query.toString()}`;
 
-  // Jika berupa foto (JPG/PNG), buat Signed Delivery URL dengan penghapusan EXIF/GPS (fl_strip_profile)
-  // serta pratinjau yang diburamkan (e_blur:1200) untuk perlindungan trauma visual petugas/pelapor.
   let previewUrl: string | null = null;
   let blurredPreviewUrl: string | null = null;
 
@@ -284,10 +236,7 @@ export function buildCloudinarySignedDownloadUrl(params: {
   };
 }
 
-/**
- * Membangun URL transformasi publik yang telah dioptimalkan & dibersihkan EXIF-nya
- * khusus untuk aset non-rahasia (Foto Profil K2 `avatar` atau Sampul Edukasi K4 `education`).
- */
+// URL Gambar Publik Teroptimasi
 export function buildCloudinaryPublicImageUrl(params: {
   storagePath: string;
   preset: 'avatar' | 'education_cover';
@@ -311,9 +260,7 @@ export function buildCloudinaryPublicImageUrl(params: {
   return `https://res.cloudinary.com/${encodeURIComponent(cfg.cloudName)}/image/upload/${transform}/${publicId}.${format}`;
 }
 
-/**
- * Membangun instruksi Signed Upload untuk alur inisiasi 2-tahap (`registerEvidenceUpload` Mode 3).
- */
+// Inisiasi Signed Upload
 export function buildCloudinarySignedUploadGrant(params: {
   storagePath: string;
   contentType: EvidenceContentType;
@@ -338,7 +285,6 @@ export function buildCloudinarySignedUploadGrant(params: {
   );
   const timestamp = Math.floor(Date.now() / 1000);
 
-  // SEC-F05: overwrite='false' mencegah penimpaan objek yang sudah ada
   const toSign: Record<string, string | number> = {
     overwrite: 'false',
     public_id: publicId,
@@ -379,11 +325,7 @@ export interface CloudinaryUploadResponse {
   secureUrl: string;
 }
 
-/**
- * Mengunggah biner terverifikasi ke Cloudinary melalui Server-to-Server REST API.
- * - Menggunakan `overwrite: 'false'` (SEC-F05: menolak penimpaan objek bukti lama).
- * - Menggunakan `type: 'private'` secara default untuk bukti laporan & lampiran chat.
- */
+// Unggah Biner ke Cloudinary
 export async function uploadBytesToCloudinary(params: {
   storagePath: string;
   bytes: Uint8Array;
@@ -476,10 +418,7 @@ export async function uploadBytesToCloudinary(params: {
   };
 }
 
-/**
- * Mengunduh biner objek dari Cloudinary menggunakan Signed Download URL internal
- * untuk memverifikasi keberadaan, ukuran, Magic Bytes, dan SHA-256 pada alur Finalisasi 2-Tahap.
- */
+// Unduh Biner dari Cloudinary
 export async function downloadBytesFromCloudinary(params: {
   storagePath: string;
   contentType: string;
@@ -513,11 +452,7 @@ export async function downloadBytesFromCloudinary(params: {
   }
 }
 
-/**
- * Menghapus aset dari Cloudinary (`POST /v1_1/{cloud_name}/{resource_type}/destroy`).
- * Digunakan untuk compensating rollback (FILE-04 / NFR-REL-01) bila penulisan Firestore gagal,
- * maupun saat dokumen/aset dihapus.
- */
+// Hapus Aset Cloudinary
 export async function deleteFromCloudinary(params: {
   storagePath: string;
   contentType?: string;

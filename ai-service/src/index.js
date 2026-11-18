@@ -1,10 +1,10 @@
-/** Titik masuk: `npm start`. */
+// Entry Point AI Service
 import { PORT, HOST, SHARED_SECRET, ALLOW_NO_AUTH } from './config.js';
 import { createServer } from './server.js';
 import { loadIndex } from './rag/indexStore.js';
 
 const server = createServer();
-// LLM lokal/Colab bisa lambat; jangan putus koneksi di tengah jawaban.
+// Batas Waktu Request
 server.requestTimeout = 180_000;
 
 server.listen(PORT, HOST, () => {

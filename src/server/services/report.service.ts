@@ -1,13 +1,4 @@
-/**
- * SISKA — Report Domain Service (`ReportService`)
- * Sumber otoritas:
- * - docs/01-SRS.md FR-006, FR-008, FR-009, §7
- * - docs/02-ERD.md §2, §4, §6
- * - docs/04-API-SPEC.yaml (/reports, /reports/{reportId})
- * - docs/05-BACKEND-ARCHITECTURE.md §2.3, §4, §6 (Status dan transaksi)
- * - docs/08-AUTHORIZATION-MATRIX.md
- * - docs/09-TEST-PLAN.md REP-01..REP-06
- */
+// Layanan Domain Laporan
 
 import type { DocumentData, Query } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebase/admin';
@@ -56,6 +47,7 @@ export {
   type SerializedStatusHistoryItem,
 };
 
+// Serialisasi Dokumen Laporan
 function serializeReportDoc(id: string, data: DocumentData): SerializedReport {
   return {
     id,
@@ -71,13 +63,7 @@ function serializeReportDoc(id: string, data: DocumentData): SerializedReport {
   };
 }
 
-/**
- * Membuat laporan baru (`POST /api/v1/reports`).
- * - Hanya diizinkan untuk `reporter` terautentikasi (docs/08-AUTHORIZATION-MATRIX.md).
- * - `reporterId` diturunkan langsung dari `caller.uid` (REP-01).
- * - Menyimpan dokumen `reports/{id}`, riwayat awal `statusHistory` (`null -> submitted`),
- *   dan entri `auditEvents` secara atomik melalui WriteBatch.
- */
+// Pembuatan Laporan Baru
 export async function createReport(
   caller: AuthenticatedCaller,
   input: CreateReportInput,
@@ -142,11 +128,7 @@ export async function createReport(
   return serializeReportDoc(reportRef.id, reportData);
 }
 
-/**
- * Mengambil daftar laporan (`GET /api/v1/reports`) dengan paginasi cursor.
- * - Jika `caller.role === 'reporter'`, hanya mengembalikan laporan milik `caller.uid` (FR-008).
- * - Jika `caller.role === 'admin'`, mengembalikan daftar laporan sesuai filter status.
- */
+// Daftar Laporan Berpaginasi
 export async function listReports(
   caller: AuthenticatedCaller,
   query: ListReportsQuery,
@@ -183,7 +165,6 @@ export async function listReports(
     fsQuery = fsQuery.startAfter(cursorSnap);
   }
 
-  // Ambil limit + 1 untuk mengetahui apakah masih ada halaman berikutnya (`nextCursor`)
   const snapshot = await fsQuery.limit(query.limit + 1).get();
   const hasMore = snapshot.docs.length > query.limit;
   const pageDocs = hasMore ? snapshot.docs.slice(0, query.limit) : snapshot.docs;
@@ -200,13 +181,7 @@ export async function listReports(
   };
 }
 
-/**
- * Mengambil detail laporan beserta sub-koleksi `evidence` dan `statusHistory`
- * (`GET /api/v1/reports/{reportId}`).
- * - Menegakkan `assertCanReadReport`: jika pelapor A mengakses laporan pelapor B,
- *   melempar `404 NOT_FOUND` yang seragam (REP-03).
- * - Tidak pernah mengembalikan URL publik pada daftar `evidence` (docs/02-ERD.md §4).
- */
+// Detail Laporan Lengkap
 export async function getReportDetail(
   caller: AuthenticatedCaller,
   reportId: string,
@@ -260,16 +235,7 @@ export async function getReportDetail(
   };
 }
 
-/**
- * Memperbarui status laporan secara atomik (`PATCH /api/v1/reports/{reportId}` atau `/status`).
- * Sesuai docs/05-BACKEND-ARCHITECTURE.md §6 & REP-04 / REP-05 / REP-06:
- * 1. Hanya dapat dipanggil oleh Admin dengan Custom Claim terverifikasi (`requireAdmin`).
- * 2. Berjalan di dalam satu Firestore Transaction (`db.runTransaction`).
- * 3. Memvalidasi aturan transisi (`assertValidStatusTransition`).
- * 4. Memperbarui `reports.status`, `updatedAt`, dan `resolvedAt` (jika status menuju/dari `resolved`).
- * 5. Menambahkan dokumen baru pada sub-koleksi `reports/{reportId}/statusHistory`.
- * 6. Mencatat event pada koleksi `auditEvents` tanpa menyertakan isi laporan/catatan.
- */
+// Pembaruan Status Laporan
 export async function updateReportStatus(
   caller: AuthenticatedCaller,
   reportId: string,
@@ -319,7 +285,6 @@ export async function updateReportStatus(
       occurredAt: now,
     });
 
-    // Otomatis kirim In-App Notification ke reporter terkait perubahan status
     if (currentData.reporterId) {
       const notifRef = db
         .collection('users')
@@ -359,12 +324,7 @@ export async function updateReportStatus(
   return updatedReport;
 }
 
-/**
- * Menghitung ringkasan statistik jumlah laporan per status (`GET /api/v1/reports/summary`).
- * Sesuai docs/01-SRS.md FR-005 & FR-015:
- * - Untuk `reporter`: hanya menghitung laporan milik pelapor yang bersangkutan (`reporterId == caller.uid`).
- * - Untuk `admin`: menghitung agregat seluruh laporan hanya dari field `status`, tanpa mengekspos data identitas atau kronologi.
- */
+// Ringkasan Statistik Laporan
 export async function getReportsSummary(
   caller: AuthenticatedCaller,
 ): Promise<ReportsSummaryResult> {

@@ -1,7 +1,4 @@
-/**
- * SISKA — Next.js Route Handler Security & Error Boundary Wrapper
- * Sumber otoritas: docs/05-BACKEND-ARCHITECTURE.md §2.2, §4, §8
- */
+// Pembungkus Route Handler
 
 import type { NextRequest, NextResponse } from 'next/server';
 import {
@@ -40,19 +37,11 @@ export interface RawAuthRouteContext<TParams = Record<string, string>> {
 }
 
 export interface RouteAuthOptions {
-  /** Daftar role yang diizinkan. Default: `['reporter', 'admin']` */
   roles?: readonly UserRole[];
-  /** Jika true, wajib role `'admin'` dengan Custom Claim terverifikasi */
   adminOnly?: boolean;
 }
 
-/**
- * Membungkus Next.js App Router Handler dengan:
- * 1. Pembuatan `requestId` (`X-Request-Id`)
- * 2. Verifikasi Firebase ID Token (`Authorization: Bearer <token>`)
- * 3. Pemeriksaan Role (`AuthzService`)
- * 4. Penanganan Error terstandarisasi (`{ code, message, requestId }`)
- */
+// Rute Terautentikasi Penuh
 export function withAuthenticatedRoute<
   TParams = Record<string, string>,
   TResponse = unknown,
@@ -93,10 +82,7 @@ export function withAuthenticatedRoute<
   };
 }
 
-/**
- * Varian pembungkus untuk rute yang hanya membutuhkan token Firebase Auth valid
- * meskipun dokumen profil/claim role baru sedang diprovisioning (mis. inisiasi profil `/api/v1/profile`).
- */
+// Rute Token Terverifikasi
 export function withVerifiedTokenRoute<
   TParams = Record<string, string>,
   TResponse = unknown,
@@ -125,4 +111,3 @@ export function withVerifiedTokenRoute<
     }
   };
 }
-

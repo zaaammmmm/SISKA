@@ -1,12 +1,4 @@
-/**
- * SISKA — Audit Event Domain Service (`AuditService`)
- * Sumber otoritas:
- * - docs/01-SRS.md FR-013, NFR-OBS-01
- * - docs/02-ERD.md §4 (`auditEvents`: actorUid, action, targetType, targetId, occurredAt, requestId)
- * - docs/05-BACKEND-ARCHITECTURE.md §4.7 & §6
- * - docs/08-AUTHORIZATION-MATRIX.md ("Audit events: Reporter Deny, Admin Restricted read; no client writes")
- * - docs/09-TEST-PLAN.md PRIV-01 ("No secrets, evidence, report narrative or raw sensitive transcript")
- */
+// Layanan Domain Audit
 
 import type {
   DocumentData,
@@ -53,6 +45,7 @@ export interface CreateAuditEventInput {
   occurredAt?: Date;
 }
 
+// Serialisasi Dokumen Audit
 function serializeAuditDoc(
   id: string,
   data: DocumentData,
@@ -68,10 +61,7 @@ function serializeAuditDoc(
   };
 }
 
-/**
- * Membangun objek dokumen `auditEvents` yang hanya memuat 6 kunci kanonis
- * sesuai `ALLOWED_KEYS.auditEvents` pada `seed-data.mjs` dan `docs/02-ERD.md §4`.
- */
+// Pembentukan Objek Audit
 export function buildAuditEventData(
   input: CreateAuditEventInput,
 ): AuditEventDocument {
@@ -85,9 +75,7 @@ export function buildAuditEventData(
   };
 }
 
-/**
- * Menambahkan dokumen `auditEvents` di dalam suatu Firestore `Transaction` yang sedang berlangsung.
- */
+// Audit dalam Transaksi
 export function recordAuditEventInTransaction(
   tx: Transaction,
   input: CreateAuditEventInput,
@@ -98,9 +86,7 @@ export function recordAuditEventInTransaction(
   return auditRef.id;
 }
 
-/**
- * Menambahkan dokumen `auditEvents` di dalam suatu Firestore `WriteBatch`.
- */
+// Audit dalam Batch
 export function recordAuditEventInBatch(
   batch: WriteBatch,
   input: CreateAuditEventInput,
@@ -111,9 +97,7 @@ export function recordAuditEventInBatch(
   return auditRef.id;
 }
 
-/**
- * Mencatat dokumen `auditEvents` secara mandiri di Firestore.
- */
+// Pencatatan Audit Mandiri
 export async function recordAuditEvent(
   input: CreateAuditEventInput,
 ): Promise<string> {
@@ -123,10 +107,7 @@ export async function recordAuditEvent(
   return auditRef.id;
 }
 
-/**
- * Mengambil daftar riwayat `auditEvents` berpaginasi (`GET /api/v1/admin/audit-events`).
- * Hanya dapat diakses oleh Admin dengan Custom Claim terverifikasi (FR-013 & 08-AUTHORIZATION-MATRIX.md).
- */
+// Daftar Riwayat Audit
 export async function listAuditEvents(
   caller: AuthenticatedCaller,
   pagination: PaginationParams,

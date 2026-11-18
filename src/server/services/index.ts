@@ -1,8 +1,4 @@
-/**
- * SISKA — Domain Services Barrel (`src/server/services`)
- * Sumber otoritas:
- * - docs/05-BACKEND-ARCHITECTURE.md §2 (`ReportService`, `EvidenceService`, `ConversationService`, `KnowledgeBaseService`, `AuditService`, `ProfileService`, `AiGatewayService`)
- */
+// Ekspor Layanan Domain
 
 export * as ReportService from '@/server/services/report.service';
 export * as EvidenceService from '@/server/services/evidence.service';
@@ -81,5 +77,3 @@ export {
   markAllNotificationsAsRead,
   broadcastNotificationByAdmin,
 } from '@/server/services/notification.service';
-
-

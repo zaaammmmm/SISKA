@@ -1,11 +1,4 @@
-/**
- * SISKA — Standard API Error Contract & Response Serializer
- * Sumber otoritas:
- * - docs/04-API-SPEC.yaml (components/schemas/Error)
- * - docs/05-BACKEND-ARCHITECTURE.md §8 (Error contract)
- * - docs/01-SRS.md NFR-OBS-01 (PII-safe structured logging)
- * - docs/09-TEST-PLAN.md REP-03 (Indistinguishable Not-Found response on cross-user access)
- */
+// Penanganan Error API
 
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
@@ -27,9 +20,7 @@ export interface ApiErrorOptions {
   internalReason?: string;
 }
 
-/**
- * Menghasilkan Request ID unik (`req_<uuid>`) atau membaca dari header `x-request-id` jika sudah valid.
- */
+// Resolusi Request ID
 export function resolveRequestId(request?: Request): string {
   const incoming = request?.headers.get('x-request-id')?.trim();
   if (incoming && /^[a-zA-Z0-9_-]{8,64}$/.test(incoming)) {
@@ -38,10 +29,7 @@ export function resolveRequestId(request?: Request): string {
   return `req_${randomUUID()}`;
 }
 
-/**
- * Representasi Error standar domain/API SISKA.
- * Selalu diserialisasi menjadi `{ code, message, requestId, fields? }` tanpa membocorkan stack trace atau PII.
- */
+// Kelas Error API
 export class ApiError extends Error {
   public readonly code: ApiErrorCode;
   public readonly status: number;
@@ -59,7 +47,7 @@ export class ApiError extends Error {
     this.internalReason = options.internalReason;
   }
 
-  /** 400 — Input tidak valid atau melanggar aturan validasi schema (dilengkapi rincian per-field opsional) */
+  // Error Validasi 400
   static validation(
     message = 'Data permintaan tidak valid.',
     fields?: ApiErrorFieldMap,
@@ -72,7 +60,7 @@ export class ApiError extends Error {
     });
   }
 
-  /** 401 — Token tidak ada, kedaluwarsa, atau tidak valid */
+  // Error Autentikasi 401
   static unauthenticated(
     message = 'Sesi autentikasi tidak valid atau telah berakhir.',
   ): ApiError {
@@ -83,7 +71,7 @@ export class ApiError extends Error {
     });
   }
 
-  /** 403 — Peran pemanggil tidak berwenang pada level endpoint/peran (mis. reporter memanggil endpoint admin) */
+  // Error Otorisasi 403
   static forbidden(
     message = 'Anda tidak memiliki wewenang untuk melakukan tindakan ini.',
   ): ApiError {
@@ -94,11 +82,7 @@ export class ApiError extends Error {
     });
   }
 
-  /**
-   * 404 — Resource tidak ditemukan ATAU milik pengguna lain.
-   * Sesuai docs/05-BACKEND-ARCHITECTURE.md §8 & REP-03 / FILE-03 / CHAT-02:
-   * Pesan sengaja dibuat seragam agar tidak membocorkan eksistensi ID resource pihak lain (Anti-IDOR).
-   */
+  // Error Tidak Ditemukan
   static notFound(
     message = 'Data yang diminta tidak ditemukan atau tidak tersedia untuk akun Anda.',
   ): ApiError {
@@ -109,7 +93,7 @@ export class ApiError extends Error {
     });
   }
 
-  /** 409 — Transisi status ilegal atau konflik state (REP-06) */
+  // Error Konflik 409
   static conflict(
     message = 'Tindakan tidak dapat dilakukan karena status data saat ini tidak mengizinkannya.',
   ): ApiError {
@@ -120,7 +104,7 @@ export class ApiError extends Error {
     });
   }
 
-  /** 413 / 400 — Berkas bukti melanggar batas ukuran, MIME allowlist, atau pemeriksaan konten (FILE-02) */
+  // Error Unggahan Ditolak
   static uploadRejected(
     message = 'Berkas ditolak. Pastikan format (PDF/JPEG/PNG) dan ukuran berkas sesuai ketentuan.',
     status: 400 | 413 = 400,
@@ -134,7 +118,7 @@ export class ApiError extends Error {
     });
   }
 
-  /** 429 — Melebihi batas laju permintaan (dilengkapi header Retry-After sesuai 04-API-SPEC.yaml) */
+  // Error Batas Laju
   static rateLimited(
     retryAfterSeconds = 60,
     message = 'Terlalu banyak permintaan. Silakan coba kembali beberapa saat lagi.',
@@ -149,7 +133,7 @@ export class ApiError extends Error {
     });
   }
 
-  /** 500 — Kesalahan internal server dengan pesan aman untuk pengguna */
+  // Error Internal 500
   static internal(
     internalReason?: string,
     message = 'Terjadi kendala pada layanan. Silakan coba kembali nanti.',
@@ -163,10 +147,7 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Mengubah sembarang error menjadi `NextResponse<ApiErrorBody>` dengan header `X-Request-Id`.
- * Log internal hanya mencatat metadata aman (tanpa payload laporan/token/bukti — NFR-OBS-01).
- */
+// Serialisasi Respons Error
 export function toErrorResponse(
   error: unknown,
   requestId: string,
@@ -205,8 +186,7 @@ export function toErrorResponse(
     );
   }
 
-  // Error tak terduga: catat diagnostik terbatas untuk korelasi request.
-  // Jangan pernah mencatat request body, header Authorization, token, atau objek error utuh.
+  // Redaksi Log Error
   const errorObject = error instanceof Error ? error : null;
   const safeErrorName = errorObject?.name || 'UnknownError';
   const rawMessage = errorObject?.message || String(error ?? 'Unknown error');
@@ -250,9 +230,7 @@ export function toErrorResponse(
   );
 }
 
-/**
- * Membungkus respons JSON sukses dengan header standar keamanan (`X-Request-Id`, `Cache-Control: no-store`).
- */
+// Respons JSON Sukses
 export function jsonSuccess<T>(
   data: T,
   requestId: string,

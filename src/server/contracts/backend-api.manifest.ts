@@ -1,14 +1,4 @@
-/**
- * SISKA — Backend API Endpoint Manifest & Architecture Contract
- * Sumber otoritas:
- * - docs/04-API-SPEC.yaml (OpenAPI 3.1.0 `/api/v1`)
- * - docs/05-BACKEND-ARCHITECTURE.md §4 (7-Step Request Flow) & §8 (Error Contract)
- * - docs/08-AUTHORIZATION-MATRIX.md (RBAC & Ownership Matrix)
- *
- * File ini menyediakan peta lengkap seluruh endpoint backend `/api/v1/*`
- * agar Tim Frontend dan Tim AI dapat melihat status, metode, otorisasi,
- * dan rate limit setiap endpoint secara langsung dari satu file TypeScript.
- */
+// Manifes Endpoint Backend
 
 import type { UserRole } from '@/types/domain';
 
@@ -22,11 +12,9 @@ export interface BackendEndpointDescriptor {
   description: string;
 }
 
-/**
- * Daftar lengkap seluruh endpoint `/api/v1/*` yang aktif di Backend SISKA.
- */
+// Daftar Endpoint Aktif
 export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
-  // 1. Health & Readiness
+  // Health & Readiness
   {
     id: 'health.readiness',
     method: 'GET',
@@ -37,7 +25,7 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
     description: 'Memeriksa kesiapan server backend dan status mode integrasi AI RAG.',
   },
 
-  // 2. Profile & Initial Provisioning
+  // Profil Pengguna
   {
     id: 'profile.get',
     method: 'GET',
@@ -66,7 +54,7 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
     description: 'Memperbarui subset profil yang diizinkan (`displayName`, `phone`).',
   },
 
-  // 3. Reports & Case Status
+  // Laporan & Status
   {
     id: 'reports.list',
     method: 'GET',
@@ -113,7 +101,7 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
     description: 'Memperbarui status laporan, menambah `statusHistory`, dan mencatat `auditLogs` dalam 1 transaksi atomik.',
   },
 
-  // 4. Private Evidence Upload & Signed URL Download
+  // Bukti Laporan
   {
     id: 'evidence.upload',
     method: 'POST',
@@ -133,7 +121,7 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
     description: 'Menerbitkan Signed URL jangka pendek (TTL <= 300 detik) untuk bukti privat.',
   },
 
-  // 5. Conversations & Messages (Confidential Human Chat)
+  // Percakapan & Pesan
   {
     id: 'conversations.list',
     method: 'GET',
@@ -198,7 +186,7 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
     description: 'Mengotorisasi pengunduhan/pratinjau lampiran foto atau berkas pada pesan percakapan.',
   },
 
-  // 6. SISKA AI General Assistant
+  // Asisten SISKA AI
   {
     id: 'ai.chat',
     method: 'POST',
@@ -209,7 +197,7 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
     description: 'Tanya jawab informasi umum dengan Safety Gate, Prompt Injection Filter, Relevance Gate, dan sitasi dokumen.',
   },
 
-  // 7. Admin Knowledge Base & Audit Logs
+  // Knowledge Base & Audit
   {
     id: 'admin.kb.list',
     method: 'GET',
@@ -256,7 +244,7 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
     description: 'Mengambil daftar riwayat audit keamanan sistem.',
   },
 
-  // 7. Public Education Materials & Admin Content Management
+  // Materi Edukasi
   {
     id: 'education.list',
     method: 'GET',
@@ -303,7 +291,7 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
     description: 'Menghapus materi edukasi dari sistem.',
   },
 
-  // 8. In-App Notifications & Admin Broadcast
+  // Notifikasi In-App
   {
     id: 'notifications.list',
     method: 'GET',
@@ -350,4 +338,3 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
     description: 'Mengirimkan notifikasi serentak (broadcast) ke seluruh pelapor atau seluruh pengguna.',
   },
 ] as const;
-

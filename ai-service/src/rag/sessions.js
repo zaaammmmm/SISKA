@@ -1,11 +1,4 @@
-/**
- * Riwayat percakapan di memori proses, per (userId, conversationId).
- *
- * Kontrak SISKA hanya mengirim `message` + `conversationId`, jadi riwayat untuk
- * pertanyaan lanjutan ("yang kedua?", "kalau itu?") disimpan di sisi layanan AI.
- * Dibatasi jumlah sesi dan umurnya agar memori tidak membengkak.
- * Untuk deployment multi-instance, ganti dengan Redis (antarmuka get/set tetap sama).
- */
+// Penyimpanan Sesi Memori
 export class SessionStore {
   constructor(max, ttlMs, clock = Date.now) {
     this.max = max;
@@ -29,7 +22,7 @@ export class SessionStore {
   }
 
   set(key, history) {
-    this.map.delete(key); // pindahkan ke posisi terbaru
+    this.map.delete(key);
     this.map.set(key, { history, at: this.clock() });
     while (this.map.size > this.max) {
       this.map.delete(this.map.keys().next().value);

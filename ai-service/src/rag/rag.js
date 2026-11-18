@@ -6,7 +6,7 @@ import { embed, chat } from './llm.js';
 import { stripCitations } from './cleanAnswer.js';
 let bm25Cache = null;
 let limiter = null;
-/** Panggil setelah dokumen ditambah/dihapus (lihat lib/docStore.ts) agar BM25 dihitung ulang. */
+// Reset Cache Retrieval
 export function invalidateRetrievalCache() {
     bm25Cache = null;
 }
@@ -58,7 +58,7 @@ function sourcesUsed(idx, hits, ans, nCtx) {
         page: idx.chunks[hits[n - 1].i].page,
     }));
 }
-/** Kontak resmi diambil langsung dari indeks agar tidak diubah atau ditolak oleh generasi LLM. */
+// Ekstraksi Kontak Resmi
 function contactChunks() {
     const idx = loadIndex();
     return idx.chunks
@@ -140,6 +140,7 @@ async function condense(q, hist, condensePrompt, baseUrl, maxChars) {
     const first = sanitize(out.split('\n')[0], maxChars);
     return first.length >= 3 && first.length <= maxChars ? first : q;
 }
+// Pipeline Utama Jawaban
 export async function answer(qRaw, history, user, backendKind, baseUrl) {
     const t0 = Date.now();
     const idx = loadIndex();
@@ -147,8 +148,6 @@ export async function answer(qRaw, history, user, backendKind, baseUrl) {
     const lim = getLimiter();
     const cleanedHist = cleanHistory(history, idx.policy.limits.history_turns, idx.policy.limits.history_chars);
     const done = (route, rawText, extra = {}) => {
-        // Penanda sumber [n] dipakai guard untuk verifikasi, tetapi tidak boleh sampai ke pengguna.
-        // Daftar sumber (extra.sources) sudah dihitung dari teks mentah sebelum done() dipanggil.
         const text = stripCitations(rawText);
         const res = {
             route,
@@ -191,9 +190,7 @@ export async function answer(qRaw, history, user, backendKind, baseUrl) {
         const srcs = sourcesFromHits(idx, hits, hits.length);
         return done('contacts', text, { sources: srcs });
     }
-    // Mode "curhat": pengguna cerita/curhat perasaan terkait topik KS, bukan bahaya akut.
-    // Tidak wajib ground kata-per-kata ke KONTEKS (persona jadi pendengar yang hangat),
-    // tapi tetap lewat limiter yang sama dan boleh menawarkan kontak dari dokumen bila relevan.
+    // Mode Curhat Pengguna
     if (isCurhat(q, rx)) {
         lim.record(user, backendKind, true);
         try {

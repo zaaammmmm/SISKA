@@ -23,6 +23,7 @@ export interface UpdateProfileInput {
 
 const UPDATE_PROFILE_ALLOWED_KEYS = ['displayName', 'avatar'] as const;
 
+// Validasi Objek Avatar
 function parseAvatarObject(rawAvatar: unknown): ProfileAvatarUploadInput {
   if (!rawAvatar || typeof rawAvatar !== 'object' || Array.isArray(rawAvatar)) {
     const msg = "Field 'avatar' harus berupa objek berkas foto profil.";
@@ -63,7 +64,7 @@ function parseAvatarObject(rawAvatar: unknown): ProfileAvatarUploadInput {
   };
 }
 
-// Validasi Input Pembaruan Profil (JSON)
+// Validasi Profil JSON
 export function validateUpdateProfileInput(
   payload: Record<string, unknown>,
 ): UpdateProfileInput {
@@ -92,7 +93,7 @@ export function validateUpdateProfileInput(
   };
 }
 
-// Validasi Input Pembaruan Profil Beserta Foto (Multipart FormData)
+// Validasi Profil Multipart
 export async function validateMultipartUpdateProfileInput(
   formData: FormData,
   fallbackDisplayName?: string,
