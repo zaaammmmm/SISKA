@@ -8,6 +8,7 @@ import {
   addRemoteAiRagDocument,
   deleteRemoteAiRagDocument,
   listRemoteAiRagDocuments,
+  resetRemoteAiRagDocuments,
 } from '@/server/contracts/ai-service.contract';
 import { ApiError } from '@/server/errors/api-error';
 import {
@@ -120,7 +121,26 @@ export const DELETE = withAuthenticatedRoute(
   async ({ request, requestId, caller }) => {
     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.ADMIN_MUTATION);
     const body = await parseJsonObject(request);
-    assertAllowlistedKeys(body, ['file'], 'penghapusan dokumen SISKA AI');
+    assertAllowlistedKeys(body, ['file', 'reset'], 'penghapusan dokumen SISKA AI');
+
+    if (body.reset === true) {
+      const reset = await resetRemoteAiRagDocuments(requestId);
+      await recordAuditEvent({
+        actorUid: caller.uid,
+        action: 'kb.documents_reset',
+        targetType: 'knowledgeDocument',
+        targetId: 'all',
+        requestId,
+      });
+      return jsonSuccess<Record<string, unknown>>(
+        {
+          restoredBaseDocs: reset.restoredBaseDocs ?? 0,
+          removedAddedDocs: reset.removedAddedDocs ?? 0,
+        },
+        requestId,
+      );
+    }
+
     const file = validateFileName(body.file);
 
     const result = await deleteRemoteAiRagDocument(file, requestId);
@@ -132,7 +152,10 @@ export const DELETE = withAuthenticatedRoute(
       requestId,
     });
 
-    return jsonSuccess({ file, removedChunks: result.removedChunks }, requestId);
+    return jsonSuccess<Record<string, unknown>>(
+      { file, removedChunks: result.removedChunks },
+      requestId,
+    );
   },
   { adminOnly: true },
 );

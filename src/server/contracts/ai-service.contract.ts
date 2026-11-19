@@ -56,6 +56,8 @@ export interface AiServiceRagDocumentResult {
   ok: true;
   addedChunks?: number;
   removedChunks?: number;
+  restoredBaseDocs?: number;
+  removedAddedDocs?: number;
 }
 
 export interface AiServiceDocumentIngestRequest {
@@ -249,6 +251,28 @@ export async function deleteRemoteAiRagDocument(
     throw ApiError.internal(
       'AI Service returned an invalid document deletion response.',
       'AI Service mengembalikan hasil penghapusan dokumen yang tidak valid.',
+    );
+  }
+  return body;
+}
+
+// Kembalikan Dokumen RAG ke Bawaan
+export async function resetRemoteAiRagDocuments(
+  requestId: string,
+): Promise<AiServiceRagDocumentResult> {
+  const body = await requestAiService<AiServiceRagDocumentResult>(
+    `${AI_SERVICE_ENDPOINTS.ADMIN_RAG_DOCUMENTS}?reset=1`,
+    requestId,
+    { method: 'DELETE' },
+  );
+  if (
+    body.ok !== true ||
+    typeof body.restoredBaseDocs !== 'number' ||
+    typeof body.removedAddedDocs !== 'number'
+  ) {
+    throw ApiError.internal(
+      'AI Service returned an invalid document reset response.',
+      'AI Service mengembalikan hasil pemulihan dokumen yang tidak valid.',
     );
   }
   return body;

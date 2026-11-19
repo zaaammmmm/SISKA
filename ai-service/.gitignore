@@ -5,3 +5,4 @@ node_modules/
 data/runtime-settings.json
 *.tmp
 *.log
+data/runtime/

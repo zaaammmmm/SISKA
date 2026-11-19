@@ -11,7 +11,7 @@ bertanya informasi umum kepada chatbot SISKA AI.
 - Batas layanan: SISKA bukan layanan darurat dan bukan pengganti petugas
   PPKS, konselor, psikolog, pendamping hukum, atau kepolisian. SISKA adalah
   kanal pelaporan, komunikasi dengan petugas, dan edukasi/informasi awal.
-- Untuk kondisi darurat, lihat bagian "Kontak dan Bantuan Darurat".
+- Untuk kondisi darurat, lihat dokumen Kontak dan Bantuan.
 
 ## Siapa yang bisa menggunakan SISKA
 Mahasiswa, dosen, tenaga kependidikan, dan sivitas akademika UIN Sunan
@@ -36,7 +36,7 @@ Bagi admin/petugas PLT PPKS:
 2. Mengubah status laporan sesuai alur yang ditetapkan.
 3. Membalas pesan pelapor pada percakapan yang ditugaskan kepadanya.
 4. Mengelola dokumen sumber chatbot SISKA AI (unggah, lihat, hapus, dan
-   reindex dokumen PDF).
+   reindex dokumen).
 
 ## Siapa yang menerima dan memproses laporan
 Laporan yang masuk melalui SISKA diterima dan diproses oleh admin/petugas PLT
@@ -51,31 +51,36 @@ pencegahan dan penanganan kekerasan seksual kampus.
   server.
 - Basis data: Cloud Firestore dengan Firebase Security Rules (akses ditolak
   secara default).
-- Penyimpanan berkas: Cloud Storage privat untuk bukti laporan dan dokumen PDF
-  knowledge base.
+- Penyimpanan berkas: Cloud Storage privat untuk bukti laporan.
 - Chatbot SISKA AI: berbasis Retrieval-Augmented Generation (RAG) dengan
-  layanan Python FastAPI, embedding Qwen3-Embedding-0.6B, dan LLM yang dapat
-  diganti lewat konfigurasi.
+  layanan Node.js, embedding Qwen3-Embedding-0.6B, dan model bahasa (LLM) yang
+  dijalankan lewat Ollama dan dapat diganti lewat konfigurasi.
 - SISKA tidak menggunakan Supabase atau PostgreSQL.
 
 ## Chatbot SISKA AI
 SISKA AI adalah asisten informasi berbasis RAG yang hanya menjawab
 berdasarkan dokumen resmi yang disediakan admin (profil dan FAQ SISKA, kontak
 bantuan, pedoman kampus, dan peraturan terkait).
-- Jawaban menyertakan rujukan dokumen. Jika informasinya tidak ada di dokumen,
-  SISKA AI menyatakan belum tercantum dan mengarahkan pengguna ke chat admin.
+- Jika informasinya tidak ada di dokumen, SISKA AI menyatakan belum tercantum
+  dan mengarahkan pengguna ke chat admin.
 - SISKA AI tidak mengakses laporan, bukti, chat dengan admin, atau profil
   pengguna. Permintaan isi laporan, identitas pelapor, atau kredensial sistem
   ditolak.
 - SISKA AI tidak memproses laporan, memberi diagnosis, konseling, nasihat
   medis atau hukum, menilai kebenaran laporan, menentukan sanksi, atau
   menjamin hasil penanganan.
+- SISKA AI tidak dapat mengubah, menghapus, atau membatalkan laporan, dan tidak
+  mengambil keputusan administratif. Hal itu hanya dapat ditangani admin/petugas
+  PLT PPKS lewat chat dengan admin.
 - SISKA AI tidak menggantikan admin. Untuk kasus pribadi, pengguna diarahkan
   chat dengan admin.
 - Pengguna diminta tidak memasukkan nama, kronologi rinci, atau data pribadi
   ke SISKA AI.
-- SISKA AI hanya boleh menyebut nomor kontak yang tercantum di bagian "Kontak
-  dan Bantuan Darurat" dan tidak boleh mengarang nomor lain.
+- SISKA AI hanya menyebut nomor kontak yang tercantum di dokumen Kontak dan
+  Bantuan dan tidak boleh mengarang nomor lain.
+- Ada batas pemakaian: setiap pengguna dapat mengirim maksimal 10 pesan per jam
+  dan 30 pesan per hari ke SISKA AI. Pertanyaan yang terlalu panjang dipotong
+  pada batas 500 karakter.
 
 ## Kerahasiaan dan identitas pelapor
 - Pelapor hanya dapat melihat laporan, bukti, dan percakapan miliknya sendiri.
@@ -92,29 +97,42 @@ bantuan, pedoman kampus, dan peraturan terkait).
   karena laporan terkait dengan akun pengguna. Untuk kepastian, hubungi
   admin/petugas PLT PPKS langsung melalui SISKA atau kontak resmi.
 
-# Kontak dan Bantuan Darurat
+# Prosedur Pelaporan lewat SISKA
 
-Bagian ini adalah satu-satunya sumber nomor kontak resmi yang boleh
-disampaikan chatbot SISKA. Chatbot SISKA bukan layanan darurat.
+## Bagaimana cara melapor lewat SISKA, langkah demi langkah?
+1. Daftar akun (menu Register) atau login jika sudah punya akun.
+2. Pilih "Buat Laporan".
+3. Pilih kategori, isi tanggal/waktu dan lokasi kejadian jika mau (opsional),
+   lalu tulis kronologi (wajib).
+4. Lampirkan bukti pendukung jika ada (opsional).
+5. Kirim laporan. Status awalnya "submitted" (menunggu verifikasi).
+6. Pantau status dan riwayat perubahannya di daftar/detail laporan, dan
+   gunakan chat dengan admin untuk bertanya atau menambah informasi.
 
-## Daftar nomor darurat dan kontak bantuan
-1. Polri Call Center, nomor 110 (kondisi darurat atau bahaya langsung).
-   Gunakan bila sedang diserang, terancam, atau butuh pertolongan segera.
-   Website: https://polri.go.id/kontak/call-center-110
-2. Hotline pengaduan PLT PPKS UIN Sunan Kalijaga, nomor 0811-2551-922.
-   Hotline resmi kampus untuk pengaduan kekerasan seksual di lingkungan UIN
-   Sunan Kalijaga, dikelola Satuan Tugas PPKS.
-   Email: pltppks@uin-suka.ac.id. Website: https://pltppks.uin-suka.ac.id/
-3. SAPA 129 Kementerian Pemberdayaan Perempuan dan Perlindungan Anak (PPPA),
-   telepon 129 atau WhatsApp 08111-129-129. Layanan nasional pengaduan dan
-   rujukan kekerasan terhadap perempuan dan anak.
-   Website: https://laporsapa129.kemenpppa.go.id/
+## Apa yang terjadi setelah laporan saya terkirim?
+Laporan diteruskan ke admin/petugas PLT PPKS. Statusnya berubah mengikuti alur
+submitted, under_review, in_progress, lalu resolved atau rejected, dan setiap
+perubahan tercatat. Proses pemeriksaan resmi di kampus mengikuti Peraturan
+Rektor dan Pedoman PPKS UIN Sunan Kalijaga. SISKA tidak menjanjikan waktu
+respons maupun hasil penanganan tertentu.
 
-## Kapan menghubungi yang mana
-- Dalam bahaya langsung sekarang (sedang diserang atau terancam): hubungi 110.
-- Ingin melaporkan atau berkonsultasi soal kekerasan seksual di kampus UIN
-  Sunan Kalijaga: hubungi PLT PPKS di 0811-2551-922 atau gunakan SISKA.
-- Butuh layanan rujukan nasional di luar kampus: hubungi SAPA 129.
+## Apakah saksi atau orang lain boleh melaporkan?
+SISKA dapat digunakan oleh sivitas akademika yang mengalami, menyaksikan, atau
+ingin melaporkan dugaan kekerasan seksual di lingkungan kampus. Menurut
+Pedoman PPKS UIN Sunan Kalijaga, bila korban diwakili pihak lain, harus
+disertai surat kuasa.
+
+## Bisakah saya melapor selain lewat SISKA?
+Bisa. Laporan juga dapat disampaikan langsung lewat hotline PLT PPKS di
+0811-2551-922 atau email pltppks@uin-suka.ac.id. Menurut Pedoman PPKS,
+pengaduan dapat disampaikan lewat nomor hotline, email, website, media sosial
+(Instagram, TikTok), telepon, atau kanal lain.
+
+## Bagaimana jika saya ingin mengubah atau menghapus laporan yang sudah dikirim?
+Chatbot SISKA AI tidak dapat mengubah, menghapus, atau membatalkan laporan.
+Daftar fitur pelapor di SISKA juga tidak mencakup mengubah atau menghapus
+laporan yang sudah terkirim. Untuk menambah informasi atau meminta perubahan,
+gunakan chat dengan admin atau hubungi PLT PPKS di 0811-2551-922.
 
 # FAQ SISKA
 
@@ -199,6 +217,17 @@ memberi konseling, membaca laporan pengguna, atau menjamin hasil penanganan.
 Untuk hal pribadi, gunakan chat dengan admin atau hubungi PLT PPKS di
 0811-2551-922.
 
+## Apa saja yang bisa saya tanyakan ke chatbot SISKA AI?
+Pertanyaan seputar SISKA (fitur, cara membuat laporan, status laporan, akun),
+prosedur pelaporan dan penanganan di UIN Sunan Kalijaga, pengetahuan umum
+tentang kekerasan seksual (definisi, bentuk, hak korban, dasar hukum), serta
+kontak bantuan. Pertanyaan di luar topik itu tidak dijawab.
+
+## Apakah chatbot SISKA bisa melihat atau mengubah laporan saya?
+Tidak. Chatbot tidak mengakses laporan, bukti, chat dengan admin, ataupun
+profil pengguna, dan tidak dapat mengubah atau menghapus laporan. Chatbot juga
+tidak menampilkan data pelapor atau korban lain.
+
 ## Apa yang harus saya lakukan jika saya dalam keadaan darurat?
 Jika Anda atau orang lain sedang diserang, terancam, atau dalam bahaya saat
 ini, segera hubungi Polri di 110. Untuk pengaduan kekerasan seksual di kampus,
@@ -212,8 +241,8 @@ melecehkan, dan/atau menyerang tubuh, hasrat seksual seseorang, dan/atau
 fungsi reproduksi, secara paksa, bertentangan dengan kehendak seseorang,
 yang menyebabkan penderitaan fisik, psikis, seksual, kerugian secara
 ekonomi, sosial, budaya, dan/atau politik. Rincian jenis dan dasar hukumnya
-diatur dalam peraturan terkait, yaitu UU TPKS dan Pedoman Pencegahan dan
-Penanganan Kekerasan Seksual kampus.
+diatur dalam peraturan terkait, yaitu UU TPKS, Permendikbudristek 55/2024,
+serta Peraturan Rektor dan Pedoman PPKS UIN Sunan Kalijaga.
 
 ## Siapa yang bisa melihat isi laporan saya?
 Anda sebagai pemilik laporan, dan admin/petugas PLT PPKS yang berwenang

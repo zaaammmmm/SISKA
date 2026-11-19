@@ -35,7 +35,9 @@ Bila ai-service/Ollama mati, SISKA otomatis memakai fallback Firestore (REL-01) 
 | `data/export/` | Artefak dari notebook (chunks, embeddings, policy, router) — ikut di-commit (±4 MB) |
 | `data/dokumen-rag/` | Salinan sumber `.md` yang membantu penyuntingan; tidak dibaca langsung oleh server saat runtime |
 | `docs/` | Direktori sumber notebook di Google Drive (`MyDrive/capstone/docs`); bukan direktori runtime lokal |
-| `notebook/RAG_v3.ipynb` | Notebook ingest & evaluasi |
+| `data/runtime/` | Perubahan admin (dokumen tambahan, dokumen dasar yang dihapus); dibuat otomatis, diabaikan git |
+| `notebook/RAG_v4.ipynb` | Notebook ingest, uji otomatis 2 model, pemilihan model, uji manual |
+| `notebook/data_uji/data_uji_siska.csv` | Data uji sintetis (785 pertanyaan, 23 topik) |
 
 ## Yang tidak lagi tampil ke pengguna
 - penanda sumber `[1]`: dibuang setelah verifikasi guard (`src/rag/cleanAnswer.js`), plus lapisan kedua di frontend (`src/lib/ai-reply.ts`)
@@ -43,32 +45,29 @@ Bila ai-service/Ollama mati, SISKA otomatis memakai fallback Firestore (REL-01) 
 
 ## Menambah dan menghapus sumber dari SISKA
 
-Admin masuk ke SISKA, buka **Pengaturan Admin**, lalu unggah file `.md`, `.txt`, atau PDF berteks, atau isi teks langsung.
-Backend memeriksa sesi dan role admin, lalu AI service memecah teks, membuat embedding dengan model
-embedding yang sedang aktif, dan memperbarui indeks. Dokumen langsung tersedia untuk pertanyaan baru;
-tidak perlu membuka notebook atau menjalankan reindex. Dokumen yang dimasukkan admin dapat dihapus dari
-halaman yang sama. Dokumen dasar dari notebook tampil sebagai sumber readonly.
+Admin masuk ke SISKA, buka **Dokumen SISKA AI**, lalu unggah file `.md`, `.txt`, atau PDF berteks, atau isi teks langsung.
+Backend memeriksa sesi dan role admin, AI service memecah teks dengan aturan yang sama seperti notebook
+(BAB/Pasal/judul, perbaikan salah-OCR angka, pembuangan header/footer halaman), membuat embedding, lalu
+memperbarui indeks. Dokumen langsung tersedia untuk pertanyaan berikutnya.
 
-PDF maksimal 25 MiB diekstrak teksnya di backend dan penanda halaman dipertahankan dalam indeks.
-PDF hasil scan/gambar yang tidak memiliki lapisan teks belum didukung OCR; lakukan OCR dan tinjau
-hasilnya terlebih dahulu. Maksimum teks hasil ekstraksi adalah 300.000 karakter. PDF yang sama dapat
-langsung dipilih sebagai sumber AI; tidak perlu menyalinnya ke folder lokal atau menjalankan notebook.
-Jangan memasukkan kronologi laporan, nama, atau data pribadi pengguna sebagai dokumen knowledge base.
+- Semua dokumen, termasuk dokumen dasar dari notebook, dapat dihapus satu per satu. Jika `kontak-bantuan.md`
+  dihapus, chatbot menjawab bahwa kontak belum tersedia dan mengarahkan ke admin.
+- Tombol **Kembalikan ke bawaan** membuang semua perubahan admin sehingga indeks kembali sama dengan export notebook.
+- PDF maksimal 25 MiB diekstrak per halaman di backend (baris dan nomor halaman dipertahankan). PDF hasil scan
+  tanpa lapisan teks belum didukung OCR. Maksimum teks hasil ekstraksi 300.000 karakter. Dokumen besar butuh
+  waktu embedding; naikkan `AI_SERVICE_TIMEOUT_MS` (maks. 90000) di environment SISKA bila unggahan terputus.
+- Jangan memasukkan kronologi laporan, nama, atau data pribadi pengguna sebagai dokumen knowledge base.
 
-Dokumen admin disimpan sebagai bagian dari berkas indeks lokal (`chunks.json`, `embeddings.f32`,
-`manifest.json`) dan registry `web-docs.json` di `data/export/`. Folder tersebut akan berubah setelah
-unggah/hapus; cadangkan dokumen yang perlu dipertahankan dan jangan commit data uji yang tidak sengaja.
+Perubahan admin disimpan di `data/runtime/` (`state.json`, `added-chunks.json`, `added-embeddings.f32`), bukan di
+`data/export/`. Mengganti isi `data/export/` dengan hasil notebook baru atau deploy ulang tidak menghapus unggahan
+admin selama folder `data/runtime/` dipertahankan. Cadangkan folder itu bila server dipindahkan. Bila model embedding
+di export diganti sehingga dimensi vektor berubah, dokumen tambahan diabaikan dan perlu **Kembalikan ke bawaan**.
 
-### Peran notebook dan folder sumber
-
-Notebook dipakai untuk membangun ulang sumber/export awal, mengubah konfigurasi retrieval/policy, atau
-menjalankan evaluasi. Penggunaan notebook tidak diperlukan untuk operasi harian, termasuk menambah PDF
-dari halaman admin. Notebook `RAG_v3.ipynb` membaca file sumber dari `MyDrive/capstone/docs` pada Google
-Drive dan hanya memproses file yang tercantum di daftar `DOCUMENTS` notebook. Folder checkout
-`ai-service/data/dokumen-rag/` bukan input otomatis notebook maupun server; folder itu hanya salinan kerja
-Markdown. Jika ingin memakai ulang PDF lewat notebook, letakkan di `MyDrive/capstone/docs` dan daftarkan
-namanya pada `DOCUMENTS`. Perubahan admin berada di `data/export/`, bukan otomatis disalin ke folder
-sumber notebook; simpan cadangan sebelum export ulang.
+### Peran notebook
+Notebook `RAG_v4.ipynb` membaca sumber dari `MyDrive/capstone/docs`, membangun export (chunks, embeddings, policy, router),
+menguji ai-service asli dengan data uji, memilih model terbaik, dan menyimpan hasilnya di `hasil_terbaik/`. Salin isi
+`hasil_terbaik/export/` ke `data/export/` lalu restart ai-service. Salinan `.md` di `data/dokumen-rag/` adalah arsip sumber
+yang sama dengan yang dipakai notebook; server tidak membacanya saat runtime.
 
 ## Setup lokal SISKA
 
@@ -115,7 +114,7 @@ untuk produksi gunakan provider AI/service yang dikelola dan selalu tersedia.
 
 ## Endpoint
 `GET /health` (publik) · `POST /chat` · admin (header `X-Service-Authorization`):
-`GET/POST/DELETE /admin/rag-docs` (.md/.txt/PDF dengan teks hasil ekstraksi), `GET/POST /admin/settings` (ganti `local`/`colab` & URL tunnel tanpa restart), `POST /admin/reindex`.
+`GET/POST/DELETE /admin/rag-docs` (.md/.txt/PDF dengan teks hasil ekstraksi; `DELETE ?file=` menghapus satu dokumen, `DELETE ?reset=1` mengembalikan ke bawaan), `GET/POST /admin/settings` (ganti `local`/`colab` & URL tunnel tanpa restart), `POST /admin/reindex`.
 ```bash
 curl -X POST localhost:8000/admin/settings -H "X-Service-Authorization: $SECRET" \
   -d '{"backend":"colab","colabUrl":"https://xxxx.trycloudflare.com"}'
@@ -123,5 +122,5 @@ curl -X POST localhost:8000/admin/settings -H "X-Service-Authorization: $SECRET"
 
 ## Catatan operasional
 - Riwayat percakapan & rate limit ada di memori proses (hilang saat restart; untuk multi-instance pindahkan ke Redis).
-- `data/export/policy.json` saat ini masih versi v3 (belum ada mode curhat/persona v3.1). Jalankan ulang `export_all` di notebook lalu salin ke `data/export/` dan `POST /admin/reindex`.
+- Cek kesamaan dengan hasil notebook lewat `GET /health`: `index.policyVersion` harus `4`, `chatModel` harus sama dengan `PAKAI_MODEL_INI.txt`, dan `index.exportId` sama setelah export disalin.
 - PDF yang diunggah admin SISKA tetap diindeks oleh SISKA sendiri (endpoint `/admin/documents` sengaja 501 → fallback lokal).

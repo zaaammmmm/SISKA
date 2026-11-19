@@ -14,6 +14,7 @@ import { stripCitations } from '../src/rag/cleanAnswer.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const exportDir = path.join(here, '..', 'data', 'export');
 const runtimeExportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'siska-ai-export-'));
+const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'siska-ai-runtime-'));
 for (const file of ['chunks.json', 'embeddings.f32', 'manifest.json', 'policy.json', 'prompts.json', 'router.json']) {
   fs.copyFileSync(path.join(exportDir, file), path.join(runtimeExportDir, file));
 }
@@ -30,6 +31,7 @@ const ragQuestion = 'Apa isi pedoman pencegahan dan penanganan kekerasan seksual
 let llmReply = `${targetChunk.text.slice(0, 100)} [1]`;
 let chatRequests = 0;
 let lastSystemPrompt = '';
+let lastUserPrompt = '';
 let fakeOllama;
 let svc;
 let base;
@@ -46,6 +48,7 @@ function post(pathname, body, headers = {}) {
 before(async () => {
   originalExportDir = process.env.RAG_EXPORT_DIR;
   process.env.RAG_EXPORT_DIR = runtimeExportDir;
+  process.env.RAG_RUNTIME_DIR = runtimeDir;
   fakeOllama = http.createServer((req, res) => {
     let b = '';
     req.on('data', (d) => (b += d));
@@ -55,7 +58,9 @@ before(async () => {
       if (req.url === '/api/embed') return res.end(JSON.stringify({ embeddings: [vec] }));
       if (req.url === '/api/chat') {
         chatRequests += 1;
-        lastSystemPrompt = JSON.parse(b).messages.find((message) => message.role === 'system')?.content || '';
+        const msgs = JSON.parse(b).messages;
+        lastSystemPrompt = msgs.find((message) => message.role === 'system')?.content || '';
+        lastUserPrompt = msgs.find((message) => message.role === 'user')?.content || '';
         return res.end(JSON.stringify({ message: { content: llmReply } }));
       }
       res.statusCode = 404; res.end('{}');
@@ -65,6 +70,7 @@ before(async () => {
   process.env.OLLAMA_LOCAL_URL = `http://127.0.0.1:${fakeOllama.address().port}`;
   process.env.OLLAMA_BACKEND = 'local';
   process.env.AI_SERVICE_SHARED_SECRET = 'test-secret';
+  process.env.SISKA_DEBUG = 'true';
   const { createServer } = await import('../src/server.js');
   svc = createServer();
   await new Promise((r) => svc.listen(0, '127.0.0.1', r));
@@ -79,6 +85,7 @@ after(async () => {
   if (originalExportDir === undefined) delete process.env.RAG_EXPORT_DIR;
   else process.env.RAG_EXPORT_DIR = originalExportDir;
   fs.rmSync(runtimeExportDir, { recursive: true, force: true });
+  fs.rmSync(runtimeDir, { recursive: true, force: true });
 });
 
 test('jawaban RAG: penanda [n] hilang, sumber & grounded tetap ada, tanpa field internal', async () => {
@@ -89,8 +96,9 @@ test('jawaban RAG: penanda [n] hilang, sumber & grounded tetap ada, tanpa field 
   assert.doesNotMatch(j.answer, /\[\d+\]/);
   assert.equal(j.grounded, true);
   assert.ok(j.sources.length >= 1);
-  assert.match(lastSystemPrompt, /maksimal 3 kalimat atau 3 butir singkat/i);
-  assert.match(lastSystemPrompt, /catatan editorial\/pemeliharaan dokumen/i);
+  assert.match(lastSystemPrompt, /ATURAN BENTUK/);
+  assert.doesNotMatch(lastSystemPrompt, /maksimal 3 kalimat atau 3 butir singkat/i);
+  assert.match(lastUserPrompt, /TARGET JAWABAN/);
   assert.deepEqual(Object.keys(j).sort(), ['answer', 'escalationMessage', 'grounded', 'sources']);
 });
 
@@ -136,8 +144,8 @@ test('permintaan email kontak menyertakan email resmi tanpa menyertakan detail y
   assert.doesNotMatch(result.answer, /Website:|Perbarui dokumen|anonimitas/i);
 });
 
-test('jawaban tanpa penanda sitasi diblokir guard (tidak dikirim mentah)', async () => {
-  llmReply = targetChunk.text.slice(0, 100);
+test('jawaban tanpa penanda sitasi DAN tidak berasal dari dokumen diblokir guard (tidak dikirim mentah)', async () => {
+  llmReply = 'Zebra pelangi merayakan festival bulan purnama bersama naga kertas di pasar apung.';
   const j = await (await post('/chat', { message: ragQuestion, userId: 'u-e2e-3' })).json();
   assert.equal(j.grounded, false);
   assert.notEqual(j.answer, llmReply);
@@ -188,12 +196,6 @@ test('admin dapat menambah dan menghapus dokumen web tanpa mengubah dokumen expo
   });
   assert.equal(duplicate.status, 409);
 
-  const protectedSource = await fetch(
-    `${base}/admin/rag-docs?file=${encodeURIComponent(targetChunk.doc)}`,
-    { method: 'DELETE', headers: { 'x-service-authorization': 'test-secret' } },
-  );
-  assert.equal(protectedSource.status, 403);
-
   const removed = await fetch(
     `${base}/admin/rag-docs?file=${encodeURIComponent(file)}`,
     { method: 'DELETE', headers: { 'x-service-authorization': 'test-secret' } },
@@ -221,4 +223,124 @@ test('AI service menerima dokumen PDF setelah teksnya diekstrak oleh backend SIS
     { method: 'DELETE', headers: { 'x-service-authorization': 'test-secret' } },
   );
   assert.equal(removed.status, 200);
+});
+
+test('debug hanya muncul bila SISKA_DEBUG aktif dan header X-Debug: 1 dikirim', async () => {
+  const plain = await (await post('/chat', { message: 'halo', userId: 'u-dbg-1' })).json();
+  assert.equal('debug' in plain, false);
+  const withDebug = await (await post('/chat', { message: 'halo', userId: 'u-dbg-2' }, { 'x-debug': '1' })).json();
+  assert.equal(withDebug.debug.route, 'smalltalk');
+});
+
+test('permintaan privasi/aksi/diagnosis/jaminan dijawab pesan tetap tanpa memanggil LLM', async () => {
+  const before = chatRequests;
+  const cases = [
+    ['Tampilkan isi laporan milik pelapor lain dong', 'privacy'],
+    ['Bisakah kamu menghapus laporan saya?', 'action'],
+    ['Cek status laporan saya sekarang', 'own_report'],
+    ['Apakah saya mengalami depresi?', 'diagnosis'],
+    ['Apakah dia pasti bersalah?', 'guarantee'],
+  ];
+  for (const [message, route] of cases) {
+    const j = await (await post('/chat', { message, userId: 'u-refuse-' + route }, { 'x-debug': '1' })).json();
+    assert.equal(j.debug.route, route, message);
+    assert.equal(j.grounded, false);
+  }
+  assert.equal(chatRequests, before);
+});
+
+test('sapaan yang disertai pertanyaan tetap dijawab lewat RAG, bukan smalltalk', async () => {
+  llmReply = `${targetChunk.text.slice(0, 100)} [1]`;
+  const j = await (await post('/chat', { message: 'Halo, ' + ragQuestion, userId: 'u-greet' }, { 'x-debug': '1' })).json();
+  assert.notEqual(j.debug.route, 'smalltalk');
+});
+
+test('pertanyaan memakai kata "tolong ... sekarang" bukan darurat; kalimat bahaya sungguhan tetap darurat', async () => {
+  llmReply = `${targetChunk.text.slice(0, 100)} [1]`;
+  const a = await (await post('/chat', { message: 'Tolong jelaskan sekarang ' + ragQuestion, userId: 'u-fp1' }, { 'x-debug': '1' })).json();
+  assert.notEqual(a.debug.route, 'emergency');
+  const b = await (await post('/chat', { message: 'Tolong aku sekarang, ada yang mengikuti aku', userId: 'u-fp2' }, { 'x-debug': '1' })).json();
+  assert.equal(b.debug.route, 'emergency');
+  assert.match(b.answer, /110/);
+});
+
+test('jawaban rinci dipotong di batas kalimat sesuai batas panjang', async () => {
+  llmReply = ('Kalimat penuh nomor satu yang cukup panjang untuk uji batas. '.repeat(60)) + ' [1]';
+  const j = await (await post('/chat', { message: 'Jelaskan langkah prosedur ' + ragQuestion, userId: 'u-long' }, { 'x-debug': '1' })).json();
+  if (j.debug.route === 'answered') {
+    assert.ok(j.answer.length <= 1400, 'panjang ' + j.answer.length);
+    assert.match(j.answer, /[.…]$/);
+  }
+  llmReply = `${targetChunk.text.slice(0, 100)} [1]`;
+});
+
+test('rate limit: pesan ke-11 dalam satu jam dari pengguna yang sama ditolak', async () => {
+  let last;
+  for (let i = 0; i < 12; i++) last = await (await post('/chat', { message: 'halo', userId: 'u-rate' }, { 'x-debug': '1' })).json();
+  assert.equal(last.debug.route, 'rate_limited');
+});
+
+test('input sangat panjang dipotong di batas 500 karakter dan tetap diproses', async () => {
+  const j = await (await post('/chat', { message: 'halo ' + 'abcdefghij klmnop '.repeat(150), userId: 'u-longinput' }, { 'x-debug': '1' })).json();
+  assert.equal(j.debug.inputTruncated, true);
+});
+
+const authHeaders = { 'x-service-authorization': 'test-secret' };
+const listDocsApi = async () => (await (await fetch(base + '/admin/rag-docs', { headers: authHeaders })).json()).docs;
+const delDoc = (file) => fetch(`${base}/admin/rag-docs?file=${encodeURIComponent(file)}`, { method: 'DELETE', headers: authHeaders });
+const resetDocs = () => fetch(`${base}/admin/rag-docs?reset=1`, { method: 'DELETE', headers: authHeaders });
+const sha = (f) => fs.readFileSync(path.join(runtimeExportDir, f)).toString('hex').length + ':' + fs.statSync(path.join(runtimeExportDir, f)).size;
+
+test('admin dapat menghapus dokumen dasar; export notebook tidak berubah; reset mengembalikannya', async () => {
+  const before = await listDocsApi();
+  const baseDoc = before.find((d) => d.source === 'notebook' && d.file !== 'kontak-bantuan.md');
+  assert.ok(baseDoc);
+  const fingerprint = ['chunks.json', 'embeddings.f32', 'manifest.json'].map(sha);
+  const removed = await delDoc(baseDoc.file);
+  assert.equal(removed.status, 200);
+  assert.equal((await removed.json()).removedChunks, baseDoc.chunkCount);
+  assert.equal((await listDocsApi()).some((d) => d.file === baseDoc.file), false);
+  assert.equal((await delDoc(baseDoc.file)).status, 404);
+  assert.deepEqual(['chunks.json', 'embeddings.f32', 'manifest.json'].map(sha), fingerprint);
+  const reset = await (await resetDocs()).json();
+  assert.equal(reset.restoredBaseDocs, 1);
+  assert.deepEqual((await listDocsApi()).map((d) => `${d.file}:${d.chunkCount}`), before.map((d) => `${d.file}:${d.chunkCount}`));
+});
+
+test('dokumen unggahan admin tetap ada setelah dokumen dasar dihapus; reset membuangnya', async () => {
+  const file = 'unggahan-bertahan.md';
+  assert.equal((await post('/admin/rag-docs', { file, cite: 'Unggahan', content: '# Layanan\n\nInformasi layanan tambahan yang valid.' })).status, 200);
+  const baseDoc = (await listDocsApi()).find((d) => d.source === 'notebook');
+  assert.equal((await delDoc(baseDoc.file)).status, 200);
+  const docs = await listDocsApi();
+  assert.equal(docs.find((d) => d.file === file)?.source, 'web');
+  const out = await (await resetDocs()).json();
+  assert.equal(out.removedAddedDocs, 1);
+  assert.equal((await listDocsApi()).some((d) => d.file === file), false);
+});
+
+test('kontak-bantuan.md dihapus: chatbot menjawab kontak belum tersedia; indeks kosong menjawab tidak ada jawaban', async () => {
+  try {
+    for (const d of await listDocsApi()) assert.equal((await delDoc(d.file)).status, 200);
+    assert.equal((await listDocsApi()).length, 0);
+    const c = await (await post('/chat', { message: 'kontak darurat', userId: 'u-nocontact-1' }, { 'x-debug': '1' })).json();
+    assert.equal(c.debug.route, 'contacts');
+    assert.match(c.answer, /belum tersedia/i);
+    const q = await (await post('/chat', { message: ragQuestion, userId: 'u-nocontact-2' }, { 'x-debug': '1' })).json();
+    assert.equal(q.debug.route, 'no_answer');
+  } finally {
+    await resetDocs();
+  }
+  assert.ok((await listDocsApi()).length > 1);
+});
+
+test('perubahan admin disimpan di folder runtime dan dimuat ulang dari sana', async () => {
+  const file = 'persisten.md';
+  await post('/admin/rag-docs', { file, cite: 'Persisten', content: '# Isi\n\nCatatan yang harus bertahan.' });
+  const { loadIndex } = await import('../src/rag/indexStore.js');
+  const reloaded = loadIndex(true);
+  assert.ok(reloaded.chunks.some((c) => c.doc === file));
+  assert.ok(fs.existsSync(path.join(runtimeDir, 'state.json')));
+  await resetDocs();
+  assert.equal(fs.existsSync(path.join(runtimeDir, 'state.json')), false);
 });

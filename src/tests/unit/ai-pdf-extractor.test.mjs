@@ -8,10 +8,11 @@ import {
   addRemoteAiRagDocument,
   deleteRemoteAiRagDocument,
   listRemoteAiRagDocuments,
+  resetRemoteAiRagDocuments,
 } from '@/server/contracts/ai-service.contract';
 import { ApiError } from '@/server/errors/api-error';
 
-test('extracts searchable PDF text while preserving page headings', async () => {
+test('extracts searchable PDF text per page, keeping line breaks and page separators', async () => {
   const bytes = makePdf([
     ['Panduan SISKA', 'Bagian: Kontak', 'Hubungi petugas pada 0811-222-333.'],
     ['Nomor darurat', 'Hubungi layanan 110.'],
@@ -19,8 +20,10 @@ test('extracts searchable PDF text while preserving page headings', async () => 
 
   const text = await extractAiPdfText(new Uint8Array(bytes), 'Panduan SISKA');
 
-  assert.match(text, /## Halaman 1/);
-  assert.match(text, /## Halaman 2/);
+  const pages = text.split('\f');
+  assert.equal(pages.length, 2);
+  assert.deepEqual(pages[0].split('\n'), ['Panduan SISKA', 'Bagian: Kontak', 'Hubungi petugas pada 0811-222-333.']);
+  assert.deepEqual(pages[1].split('\n'), ['Nomor darurat', 'Hubungi layanan 110.']);
   assert.match(text, /0811-222-333/);
   assert.match(text, /110/);
 });
@@ -81,6 +84,13 @@ test('remote AI RAG document contract supports listing, adding (.md/.txt/.pdf), 
       );
     }
 
+    if (method === 'DELETE' && String(url) === 'http://ai-service.test/admin/rag-docs?reset=1') {
+      return new Response(
+        JSON.stringify({ ok: true, restoredBaseDocs: 2, removedAddedDocs: 1 }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+
     return new Response('{}', { status: 404 });
   };
 
@@ -114,7 +124,10 @@ test('remote AI RAG document contract supports listing, adding (.md/.txt/.pdf), 
     const deleted = await deleteRemoteAiRagDocument('panduan-admin.md', 'req_del_md');
     assert.equal(deleted.ok, true);
     assert.equal(deleted.removedChunks, 4);
-    assert.equal(calls.length, 4);
+    const reset = await resetRemoteAiRagDocuments('req_reset');
+    assert.equal(reset.restoredBaseDocs, 2);
+    assert.equal(reset.removedAddedDocs, 1);
+    assert.equal(calls.length, 5);
   } finally {
     globalThis.fetch = originalFetch;
     if (savedEnv.url === undefined) delete process.env.AI_SERVICE_URL;
@@ -139,5 +152,6 @@ test('LiveAdminDocumentsPage is wired to /api/v1/admin/ai-documents while preser
   assert.match(adminBlock, /uploadAiRagPdfByAdmin/);
   assert.match(adminBlock, /addAiRagDocumentByAdmin/);
   assert.match(adminBlock, /deleteAiRagDocumentByAdmin/);
+  assert.match(adminBlock, /resetAiRagDocumentsByAdmin/);
   assert.match(adminBlock, /\.pdf,\.md,\.txt/);
 });

@@ -30,6 +30,7 @@ export type AuditAction =
   | 'conversation.updated'
   | 'kb.document_uploaded'
   | 'kb.document_deleted'
+  | 'kb.documents_reset'
   | 'kb.reindex_requested'
   | 'education.created'
   | 'education.updated'

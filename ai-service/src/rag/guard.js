@@ -1,13 +1,13 @@
-// Sanitasi Input Teks
 export function sanitize(s, limit) {
     let out = (s || '').normalize('NFKC');
-    out = out.replace(/[\x00-\x08\x0b-\x1f\x7f\u200b-\u200f\u202a-\u202e]/g, '');
+    // hapus karakter kontrol + beberapa karakter arah/zero-width yang dipaka
+    out = out.replace(/[\x00-\x08\x0b-\x1f\x7f​-‏‪-‮⁦-⁩﻿]/g, '');
     out = out.replace(/\s+/g, ' ').trim();
     out = out.replace(/(.)\1{9,}/g, '$1$1$1');
     return out.slice(0, limit);
 }
 function compileAll(patterns) {
-    return patterns.map((p) => new RegExp(p, 'i'));
+    return (patterns || []).map((p) => new RegExp(p, 'i'));
 }
 function hit(rxs, q) {
     return rxs.some((r) => r.test(q));
@@ -18,13 +18,21 @@ export function buildGuardRx(policy) {
         injection: compileAll(policy.injection),
         blocked: compileAll(policy.blocked),
         banned: compileAll(policy.banned),
-        curhat: compileAll(policy.curhat || []),
-        smalltalk: policy.smalltalk.map(([p, m]) => [new RegExp(p, 'i'), m]),
+        curhat: compileAll(policy.curhat),
+        privacy: compileAll(policy.privacy),
+        ownReport: compileAll(policy.own_report),
+        action: compileAll(policy.action),
+        diagnosis: compileAll(policy.diagnosis),
+        guarantee: compileAll(policy.guarantee),
+        question: compileAll(policy.question),
+        longQ: policy.long_q ? new RegExp(policy.long_q, 'i') : null,
+        shortQ: policy.short_q ? new RegExp(policy.short_q, 'i') : null,
+        smalltalk: (policy.smalltalk || []).map(([p, m]) => [new RegExp(p, 'i'), m]),
         contact: /(nomor|nomer|kontak|hotline|telepon|telp|hubungi|call center).{0,40}(darurat|bantuan|pengaduan|plt|ppks|polisi|sapa|satgas)|(darurat|hotline)/i,
     };
 }
 export function isCurhat(q, rx) {
-    return hit(rx.curhat, q);
+    return hit(rx.curhat, q) && !hit(rx.question, q);
 }
 export function prefilter(q) {
     if (q.length < 2)
@@ -34,6 +42,8 @@ export function prefilter(q) {
 export function prefilterAbuse(q, rx, blockedMsg) {
     if (hit(rx.injection, q))
         return { route: 'injection', msg: blockedMsg };
+    if (hit(rx.privacy, q))
+        return { route: 'privacy', msg: null };
     if (hit(rx.blocked, q))
         return { route: 'blocked_intent', msg: blockedMsg };
     for (const [r, m] of rx.smalltalk)
@@ -41,14 +51,35 @@ export function prefilterAbuse(q, rx, blockedMsg) {
             return { route: 'smalltalk', msg: m };
     return { route: null, msg: null };
 }
+// Permintaan yang SAH ditolak/dialihkan dengan pesan tetap
+export function prefilterRefuse(q, rx) {
+    if (hit(rx.ownReport, q))
+        return 'own_report';
+    if (hit(rx.action, q))
+        return 'action';
+    if (hit(rx.diagnosis, q))
+        return 'diagnosis';
+    if (hit(rx.guarantee, q))
+        return 'guarantee';
+    return null;
+}
 export function isEmergency(q, rx) {
     return hit(rx.emergency, q);
 }
+// Mode panjang jawaban
+export function lengthMode(q, rx) {
+    if (rx.shortQ && rx.shortQ.test(q))
+        return 'short';
+    return rx.longQ && rx.longQ.test(q) ? 'long' : 'short';
+}
+const DOC_NUM_CONTEXT = /(pasal|ayat|nomor|no\.?|huruf|angka|tahun|rp\.?)\s*\(?\s*$/i;
 function numsFrom(t, parts = false) {
     const text = t.replace(/\[\d+\]/g, ' ');
     const out = new Set();
-    const matches = text.match(/\d+(?:[.,-]\d+)*/g) || [];
-    for (const x of matches) {
+    const re = /\d+(?:[.,-]\d+)*/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        const x = m[0];
         out.add(x.replace(/\D/g, ''));
         if (parts)
             for (const p of x.match(/\d+/g) || [])
@@ -57,15 +88,30 @@ function numsFrom(t, parts = false) {
     out.delete('');
     return out;
 }
+// Angka pada jawaban yang WAJIB ada di KONTEKS
+function answerNumsToCheck(ans) {
+    const text = ans.replace(/\[\d+\]/g, ' ').replace(/^\s*\d{1,2}[.)]\s+/gm, '');
+    const out = new Set();
+    const re = /\d+(?:[.,-]\d+)*/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        const digits = m[0].replace(/\D/g, '');
+        if (!digits)
+            continue;
+        const before = text.slice(Math.max(0, m.index - 12), m.index);
+        if (digits.length >= 2 || DOC_NUM_CONTEXT.test(before))
+            out.add(digits);
+    }
+    return out;
+}
 function urlsFrom(t) {
     return t.match(/https?:\/\/[^\s)\]>,]+|[\w.+-]+@[\w-]+\.[\w.-]+/g) || [];
 }
 export function unsupported(ans, ctx, allowDomains, q = '') {
     const src = ctx + ' ' + q;
     const srcNums = numsFrom(src, true);
-    const ansNums = numsFrom(ans);
     const bad = [];
-    for (const n of ansNums)
+    for (const n of answerNumsToCheck(ans))
         if (!srcNums.has(n))
             bad.push(`angka:${n}`);
     for (const u of urlsFrom(ans)) {
@@ -77,13 +123,37 @@ export function unsupported(ans, ctx, allowDomains, q = '') {
     }
     return bad;
 }
-export function checkOutput(ans, ctx, rx, allowDomains, q = '') {
+const STOP = new Set('yang dan di ke dari untuk dengan ini itu atau adalah apa pada dalam akan bisa saya aku kamu apakah ada oleh juga sebagai agar jika karena dapat para kepada serta nya lah kah pun sudah belum tidak hanya harus ya sih dong'.split(' '));
+function contentTokens(s) {
+    return (s.toLowerCase().normalize('NFKC').match(/[\p{L}\p{N}]+/gu) || []).filter((w) => w.length > 2 && !STOP.has(w));
+}
+// Proporsi kata isi jawaban yang juga muncul di KONTEKS (0-1)
+export function overlapRatio(ans, ctx) {
+    const stem = (w) => (w.length > 5 ? w.slice(0, 5) : w);
+    const a = contentTokens(ans.replace(/\[\d+\]/g, ' '));
+    if (!a.length)
+        return 0;
+    const c = new Set(contentTokens(ctx).map(stem));
+    return a.filter((w) => c.has(stem(w))).length / a.length;
+}
+const LEAK_RX = [/\bKONTEKS\s*:/, /\bRIWAYAT\s*(\(data\))?\s*:/, /\bPERTANYAAN\s*(\(data\))?\s*:/, /ATURAN (ISI|BENTUK)/, /TARGET JAWABAN/, /\[\[TIDAK_TERSEDIA\]\]/, /Siska\.ai, asisten virtual platform SISKA/i];
+export function checkOutput(ans, ctx, rx, allowDomains, q = '', opts = {}) {
     const bad = unsupported(ans, ctx, allowDomains, q);
     for (const r of rx.banned)
         if (r.test(ans))
             bad.push(`klaim:${r.source}`);
-    if (!/\[\d+\]/.test(ans))
-        bad.push('tanpa_sitasi');
+    for (const r of LEAK_RX)
+        if (r.test(ans)) {
+            bad.push('bocor_prompt');
+            break;
+        }
+    if (!/\[\d+\]/.test(ans)) {
+        const minOverlap = opts.minOverlap ?? 0.6;
+        if (overlapRatio(ans, ctx) < minOverlap)
+            bad.push('tanpa_sitasi');
+        else if (opts.onUncited)
+            opts.onUncited();
+    }
     return bad;
 }
 export function cleanHistory(h, turns, chars) {
@@ -95,19 +165,23 @@ export function cleanHistory(h, turns, chars) {
 export function renderHistory(h) {
     return h.map((m) => (m.role === 'user' ? 'Pengguna: ' : 'Asisten: ') + m.text).join('\n');
 }
-// Rate Limiter Memori
+// --- Rate limiter sederhana, dalam memori proses
 export class Limiter {
     limits;
     clock;
+    disabled;
     userHits = new Map();
     strikes = new Map();
     cooldown = new Map();
     globalDay = new Map();
-    constructor(limits, clock = Date.now) {
+    constructor(limits, clock = Date.now, disabled = false) {
         this.limits = limits;
         this.clock = clock;
+        this.disabled = disabled;
     }
     check(user, backend) {
+        if (this.disabled)
+            return null;
         const now = this.clock();
         const cool = this.cooldown.get(user) || 0;
         if (cool > now)
@@ -125,6 +199,8 @@ export class Limiter {
         return null;
     }
     record(user, backend, llmCalled) {
+        if (this.disabled)
+            return;
         const now = this.clock();
         this.userHits.set(user, [...(this.userHits.get(user) || []), now]);
         if (llmCalled && backend === 'colab') {
@@ -133,6 +209,8 @@ export class Limiter {
         }
     }
     strike(user) {
+        if (this.disabled)
+            return;
         const now = this.clock();
         const s = (this.strikes.get(user) || []).filter((t) => now - t < 3_600_000);
         s.push(now);

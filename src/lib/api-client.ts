@@ -520,6 +520,16 @@ export async function deleteAiRagDocumentByAdmin(file: string): Promise<void> {
   });
 }
 
+export async function resetAiRagDocumentsByAdmin(): Promise<{
+  restoredBaseDocs: number;
+  removedAddedDocs: number;
+}> {
+  return apiRequest<{ restoredBaseDocs: number; removedAddedDocs: number }>(
+    '/admin/ai-documents',
+    { method: 'DELETE', body: { reset: true } },
+  );
+}
+
 export async function fetchKnowledgeDocumentsByAdmin(): Promise<PaginatedKnowledgeDocumentsResult> {
   return apiRequest<PaginatedKnowledgeDocumentsResult>(
     '/admin/knowledge-documents',

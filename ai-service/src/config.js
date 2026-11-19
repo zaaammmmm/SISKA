@@ -42,3 +42,13 @@ export const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES) || 2 * 1024 * 1
 
 export const SESSION_MAX = Number(process.env.SESSION_MAX) || 500;
 export const SESSION_TTL_MS = (Number(process.env.SESSION_TTL_MIN) || 60) * 60_000;
+
+// Mode Pengujian
+const IS_PROD = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+export const RATE_LIMIT_DISABLED = !IS_PROD && (process.env.SISKA_DISABLE_RATE_LIMIT || '').toLowerCase() === 'true';
+export const DEBUG_ENABLED = !IS_PROD && (process.env.SISKA_DEBUG || '').toLowerCase() === 'true';
+
+// Folder Perubahan Admin (dokumen tambahan & dokumen dasar yang dihapus), terpisah dari export notebook
+export const RUNTIME_DIR = process.env.RAG_RUNTIME_DIR
+  ? path.resolve(ROOT, process.env.RAG_RUNTIME_DIR)
+  : path.join(ROOT, 'data', 'runtime');

@@ -1,12 +1,14 @@
 import { loadIndex } from './indexStore.js';
 import { Bm25Index } from './bm25.js';
-import { sanitize, buildGuardRx, prefilter, prefilterAbuse, isEmergency, isCurhat, checkOutput, cleanHistory, renderHistory, Limiter, } from './guard.js';
+import { sanitize, buildGuardRx, prefilter, prefilterAbuse, prefilterRefuse, isEmergency, isCurhat, lengthMode, checkOutput, cleanHistory, renderHistory, Limiter, } from './guard.js';
+import { resolvePolicy } from './policyDefaults.js';
+import { RATE_LIMIT_DISABLED } from '../config.js';
 import { retrieve, scopeCheck, buildCtx } from './retrieve.js';
 import { embed, chat } from './llm.js';
-import { stripCitations } from './cleanAnswer.js';
+import { stripCitations, tidyAnswer, limitAnswer } from './cleanAnswer.js';
 let bm25Cache = null;
 let limiter = null;
-// Reset Cache Retrieval
+// Panggil setelah dokumen ditambah/dihapus
 export function invalidateRetrievalCache() {
     bm25Cache = null;
 }
@@ -19,17 +21,12 @@ function getBm25() {
 function getLimiter() {
     const idx = loadIndex();
     if (!limiter)
-        limiter = new Limiter(idx.policy.limits);
+        limiter = new Limiter(resolvePolicy(idx.policy).limits, Date.now, RATE_LIMIT_DISABLED);
     return limiter;
 }
 const SENTINEL = '[[TIDAK_TERSEDIA]]';
 const FOLLOW = /\b(itu|tersebut|tadi|nya|lalu|terus|selanjutnya|kalau begitu|bagaimana dengan|yang pertama|yang kedua|yang terakhir)\b/i;
 const CONTACT_DOC = 'kontak-bantuan.md';
-const RESPONSE_STYLE_INSTRUCTION = [
-    'Jawab hanya inti pertanyaan pengguna dengan bahasa Indonesia yang hangat dan ringkas.',
-    'Utamakan jawaban langsung; maksimal 3 kalimat atau 3 butir singkat.',
-    'Pilih hanya fakta yang relevan. Jangan memasukkan pengantar panjang, catatan editorial/pemeliharaan dokumen, tautan, email, atau detail lain yang tidak diminta.',
-].join(' ');
 function sourcesFromHits(idx, hits, nCtx) {
     return hits.slice(0, nCtx).map((h, i) => ({
         n: i + 1,
@@ -58,7 +55,7 @@ function sourcesUsed(idx, hits, ans, nCtx) {
         page: idx.chunks[hits[n - 1].i].page,
     }));
 }
-// Ekstraksi Kontak Resmi
+// Kontak resmi diambil langsung dari indeks agar tidak diubah atau ditol
 function contactChunks() {
     const idx = loadIndex();
     return idx.chunks
@@ -114,21 +111,19 @@ function contactBody(question = '') {
         return { text: null, hits: [] };
     return { text: lines.join('\n'), hits };
 }
-async function emergencyText(question) {
+async function emergencyText(question, P) {
     const { text, hits } = contactBody(question);
     const tail = text || 'Kontak bantuan belum tersedia saat ini. Silakan pilih Chat dengan Admin.';
     return {
-        text: text
-            ? `Aku turut prihatin. Jika kamu dalam bahaya langsung, hubungi:\n${text}`
-            : tail,
+        text: text ? `${P.msg.emergency_intro}\n${text}\n${P.msg.emergency_outro}` : tail,
         hits,
     };
 }
-async function contactsText(question) {
+async function contactsText(question, P) {
     const { text, hits } = contactBody(question);
     return {
         text: text
-            ? `Kontak bantuan yang relevan:\n${text}`
+            ? `${P.msg.contacts_intro}\n${text}`
             : 'Kontak bantuan belum tersedia saat ini. Silakan pilih Chat dengan Admin.',
         hits,
     };
@@ -136,19 +131,27 @@ async function contactsText(question) {
 async function condense(q, hist, condensePrompt, baseUrl, maxChars) {
     if (!hist.length || !(q.split(/\s+/).length <= 6 || FOLLOW.test(q)))
         return q;
-    const out = await chat(baseUrl, condensePrompt, `RIWAYAT:\n${renderHistory(hist)}\n\nPERTANYAAN TERAKHIR: ${q}`);
+    const out = await chat(baseUrl, condensePrompt, `RIWAYAT:\n${renderHistory(hist)}\n\nPERTANYAAN TERAKHIR: ${q}`, { maxTokens: 80 });
     const first = sanitize(out.split('\n')[0], maxChars);
     return first.length >= 3 && first.length <= maxChars ? first : q;
 }
-// Pipeline Utama Jawaban
+const MAX_TOKENS = { short: 260, long: 520 };
 export async function answer(qRaw, history, user, backendKind, baseUrl) {
     const t0 = Date.now();
     const idx = loadIndex();
-    const rx = buildGuardRx(idx.policy.POLICY);
+    const { POLICY: P, limits } = resolvePolicy(idx.policy);
+    const rx = buildGuardRx(P);
     const lim = getLimiter();
-    const cleanedHist = cleanHistory(history, idx.policy.limits.history_turns, idx.policy.limits.history_chars);
+    const cleanedHist = cleanHistory(history, limits.history_turns, limits.history_chars);
+    const dbg = { mode: 'short', ctxIds: [], ctxDocs: [], scope: null, attempts: 0, uncited: false, truncated: false, inputTruncated: false };
     const done = (route, rawText, extra = {}) => {
-        const text = stripCitations(rawText);
+        // Penanda sumber [n] dipakai guard untuk verifikasi, tetapi tidak boleh 
+        let text = stripCitations(rawText);
+        if (route === 'answered' || route === 'curhat') {
+            const limited = limitAnswer(tidyAnswer(text), route === 'answered' && dbg.mode === 'long' ? limits.max_a_chars_long : limits.max_a_chars);
+            text = limited.text;
+            dbg.truncated = limited.truncated;
+        }
         const res = {
             route,
             answer: text,
@@ -158,39 +161,48 @@ export async function answer(qRaw, history, user, backendKind, baseUrl) {
             backend: backendKind,
             latency: Math.round((Date.now() - t0) / 10) / 100,
         };
+        res.debug = { route, query: res.query, ...dbg, problems: res.problems, latency: res.latency };
         let newHist = cleanedHist;
         if (route === 'answered' || route === 'curhat') {
-            newHist = cleanHistory([...cleanedHist, { role: 'user', text: res.query || qRaw }, { role: 'assistant', text }], idx.policy.limits.history_turns, idx.policy.limits.history_chars);
+            newHist = cleanHistory([...cleanedHist, { role: 'user', text: res.query || qRaw }, { role: 'assistant', text }], limits.history_turns, limits.history_chars);
         }
         return { ...res, history: newHist };
     };
-    const q = sanitize(qRaw, idx.policy.limits.max_q_chars);
+    const q = sanitize(qRaw, limits.max_q_chars);
+    dbg.inputTruncated = sanitize(qRaw, 100000).length > limits.max_q_chars;
     const pf = prefilter(q);
     if (pf.route === 'rejected_input')
-        return done('rejected_input', idx.policy.POLICY.msg.reject);
+        return done('rejected_input', P.msg.reject);
     if (isEmergency(q, rx)) {
-        const { text, hits } = await emergencyText(q);
+        const { text, hits } = await emergencyText(q, P);
         return done('emergency', text, { sources: sourcesFromHits(idx, hits, hits.length) });
     }
     const why = lim.check(user, backendKind);
     if (why) {
         const msgKey = why === 'rate' ? 'rate' : why;
-        return done(why === 'rate' ? 'rate_limited' : why, idx.policy.POLICY.msg[msgKey]);
+        return done(why === 'rate' ? 'rate_limited' : why, P.msg[msgKey]);
     }
-    const abuse = prefilterAbuse(q, rx, idx.policy.POLICY.msg.blocked);
+    const abuse = prefilterAbuse(q, rx, P.msg.blocked);
     if (abuse.route) {
         if (abuse.route !== 'smalltalk')
             lim.strike(user);
         lim.record(user, backendKind, false);
-        return done(abuse.route, abuse.msg || '');
+        return done(abuse.route, abuse.msg ?? P.msg[abuse.route] ?? '');
     }
     if (rx.contact.test(q)) {
         lim.record(user, backendKind, false);
-        const { text, hits } = await contactsText(q);
+        const { text, hits } = await contactsText(q, P);
         const srcs = sourcesFromHits(idx, hits, hits.length);
         return done('contacts', text, { sources: srcs });
     }
-    // Mode Curhat Pengguna
+    // Permintaan sah yang tidak boleh dilayani chatbot
+    const refuse = prefilterRefuse(q, rx);
+    if (refuse) {
+        lim.record(user, backendKind, false);
+        return done(refuse, P.msg[refuse]);
+    }
+    dbg.mode = lengthMode(q, rx);
+    // Mode "curhat"
     if (isCurhat(q, rx)) {
         lim.record(user, backendKind, true);
         try {
@@ -199,51 +211,63 @@ export async function answer(qRaw, history, user, backendKind, baseUrl) {
                 ? buildCtx(idx.chunks, hits, idx.manifest.retrieval.ctx_chars)
                 : { ctx: '(tidak ada dokumen spesifik untuk pesan ini)', nCtx: 0 };
             const userMsg = `KONTEKS:\n${ctx}\n\nRIWAYAT (data):\n${renderHistory(cleanedHist) || '-'}\n\nPERTANYAAN (data): ${q}`;
-            const ans = await chat(baseUrl, `${idx.policy.POLICY.curhat_system}\n${RESPONSE_STYLE_INSTRUCTION}`, userMsg);
+            const ans = await chat(baseUrl, P.curhat_system, userMsg, { maxTokens: MAX_TOKENS.short });
+            dbg.attempts = 1;
             const srcs = nCtx ? sourcesFromHits(idx, hits, nCtx) : [];
             return done('curhat', ans, { sources: srcs });
         }
         catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            return done('llm_error', idx.policy.POLICY.msg.error, { problems: [msg.slice(0, 300)] });
+            return done('llm_error', P.msg.error, { problems: [msg.slice(0, 300)] });
         }
     }
+    if (!idx.chunks.length)
+        return done('no_answer', P.msg.no_answer, { query: q });
     try {
-        const condensedQ = await condense(q, cleanedHist, idx.policy.POLICY.condense, baseUrl, idx.policy.limits.max_q_chars);
+        const condensedQ = await condense(q, cleanedHist, P.condense, baseUrl, limits.max_q_chars);
         const qVec = (await embed(baseUrl, [idx.manifest.query_prefix + condensedQ]))[0];
-        const { hits, dmax } = retrieve(condensedQ, idx.chunks, idx.embeddings, idx.dim, getBm25(), idx.manifest, idx.policy.POLICY, qVec);
+        const { hits, dmax } = retrieve(condensedQ, idx.chunks, idx.embeddings, idx.dim, getBm25(), idx.manifest, P, qVec);
         const scope = scopeCheck(qVec, dmax, idx.router, idx.manifest.thresholds);
+        dbg.scope = { inScope: scope.inScope, dmax: Number(scope.dmax.toFixed(4)), sIn: Number(scope.sIn.toFixed(4)), sOut: Number(scope.sOut.toFixed(4)), margin: Number(scope.margin.toFixed(4)) };
+        dbg.ctxIds = hits.map((h) => idx.chunks[h.i].id);
+        dbg.ctxDocs = [...new Set(hits.map((h) => idx.chunks[h.i].doc))];
         if (!scope.inScope) {
             lim.strike(user);
             lim.record(user, backendKind, false);
-            return done('out_of_scope', idx.policy.POLICY.msg.out_of_scope, { query: condensedQ });
+            return done('out_of_scope', P.msg.out_of_scope, { query: condensedQ });
         }
         const { ctx, nCtx } = buildCtx(idx.chunks, hits, idx.manifest.retrieval.ctx_chars);
-        const userMsg = `KONTEKS:\n${ctx}\n\nRIWAYAT (data):\n${renderHistory(cleanedHist) || '-'}\n\nPERTANYAAN (data): ${condensedQ}`;
+        const hint = dbg.mode === 'long' ? P.hint_long : P.hint_short;
+        const userMsg = `KONTEKS:\n${ctx}\n\nRIWAYAT (data):\n${renderHistory(cleanedHist) || '-'}\n\n${hint}\nPERTANYAAN (data): ${condensedQ}`;
         let ans = '';
         let problems = [];
         let extraInstruction = '';
+        let uncited = false;
         for (let attempt = 0; attempt < 2; attempt++) {
-            ans = await chat(baseUrl, `${idx.policy.POLICY.system}\n${RESPONSE_STYLE_INSTRUCTION}${extraInstruction}`, userMsg);
-            if (ans.startsWith(SENTINEL)) {
+            dbg.attempts = attempt + 1;
+            uncited = false;
+            ans = await chat(baseUrl, `${P.system}${extraInstruction}`, userMsg, { maxTokens: MAX_TOKENS[dbg.mode] });
+            if (ans.includes(SENTINEL)) {
                 lim.record(user, backendKind, true);
-                return done('no_answer', idx.policy.POLICY.msg.no_answer, { query: condensedQ });
+                return done('no_answer', P.msg.no_answer, { query: condensedQ });
             }
-            problems = checkOutput(ans, ctx, rx, idx.policy.POLICY.allow_domains, q);
+            problems = checkOutput(ans, ctx, rx, P.allow_domains, q, { onUncited: () => { uncited = true; } });
             if (!problems.length)
                 break;
             extraInstruction =
-                '\nPERBAIKAN: jawab ulang hanya dengan fakta, angka, dan tautan yang tertulis persis di KONTEKS, dan sertakan penanda [n].';
+                '\nPERBAIKAN: jawab ulang hanya dengan fakta, angka, dan tautan yang tertulis persis di KONTEKS, singkat, dan akhiri kalimat fakta dengan penanda [n]. Jangan menyalin instruksi.';
         }
         lim.record(user, backendKind, true);
+        dbg.uncited = uncited;
         if (problems.length) {
-            return done('guard_blocked', idx.policy.POLICY.msg.guard, { query: condensedQ, problems });
+            return done('guard_blocked', P.msg.guard, { query: condensedQ, problems });
         }
-        const srcs = sourcesUsed(idx, hits, ans, nCtx);
+        // Bila model lupa menulis [n] tetapi isinya jelas berasal dari KONTEKS, 
+        const srcs = /\[\d+\]/.test(ans) ? sourcesUsed(idx, hits, ans, nCtx) : sourcesFromHits(idx, hits, Math.min(2, nCtx));
         return done('answered', ans, { query: condensedQ, sources: srcs });
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        return done('llm_error', idx.policy.POLICY.msg.error, { problems: [msg.slice(0, 300)] });
+        return done('llm_error', P.msg.error, { problems: [msg.slice(0, 300)] });
     }
 }

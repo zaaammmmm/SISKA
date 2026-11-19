@@ -3,7 +3,7 @@ export function embedModel() {
     return process.env.OLLAMA_EMBED_MODEL || 'qwen3-embedding:0.6b';
 }
 export function chatModel() {
-    return process.env.OLLAMA_CHAT_MODEL || 'qwen25c3b-8k:latest';
+    return process.env.OLLAMA_CHAT_MODEL || 'qwen3:4b-instruct';
 }
 /**
  * Bandingkan nama model dengan daftar dari /api/tags. Ollama menambahkan tag `:latest`
@@ -31,8 +31,8 @@ export function genOpts() {
     return {
         temperature: Number(process.env.LLM_TEMPERATURE ?? 0),
         seed: Number(process.env.LLM_SEED ?? 42),
-        num_ctx: Number(process.env.LLM_NUM_CTX ?? 8192),
-        num_predict: Number(process.env.LLM_MAX_NEW_TOKENS ?? 350),
+        num_ctx: Number(process.env.LLM_NUM_CTX ?? 6144),
+        num_predict: Number(process.env.LLM_MAX_NEW_TOKENS ?? 400),
     };
 }
 async function fetchJson(url, body, timeoutMs) {
@@ -68,7 +68,7 @@ export async function embed(baseUrl, texts) {
     });
 }
 // Panggilan Chat LLM
-export async function chat(baseUrl, system, user) {
+export async function chat(baseUrl, system, user, { maxTokens } = {}) {
     const opts = genOpts();
     const data = await fetchJson(`${baseUrl.replace(/\/$/, '')}/api/chat`, {
         model: chatModel(),
@@ -80,7 +80,7 @@ export async function chat(baseUrl, system, user) {
             { role: 'system', content: system },
             { role: 'user', content: user },
         ],
-        options: { temperature: opts.temperature, seed: opts.seed, num_ctx: opts.num_ctx, num_predict: opts.num_predict },
+        options: { temperature: opts.temperature, seed: opts.seed, num_ctx: opts.num_ctx, num_predict: maxTokens ? Math.min(maxTokens, opts.num_predict) : opts.num_predict },
     }, 120_000);
     const text = data?.message?.content ?? '';
     return text.replace(THINK_RE, '').trim();

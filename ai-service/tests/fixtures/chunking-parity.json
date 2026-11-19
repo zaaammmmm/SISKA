@@ -1,0 +1,72 @@
+{
+ "pdf": {
+  "file": "contoh-uji.pdf",
+  "cite": "Peraturan Contoh",
+  "content": "PERATURAN CONTOH NOMOR 1 TAHUN 2024\nBAB I\nKETENTUAN UMUM\nPasal 1\nDalam peraturan ini yang dimaksud dengan:\n1. Korban adalah orang yang mengalami kekerasan.\n2. Pelapor adalah orang yang melaporkan kejadian kepada petugas yang berwenang.\n1\fPERATURAN CONTOH NOMOR 1 TAHUN 2024\nPasal 2\nSetiap orang yang melakukan pelecehan seksual nonfisik dipidana penjara paling lama 9 (sembilan) bulan dan/atau denda paling banyak Rp10.0OO.000 (sepuluh juta rupiah).\nBagian Kesatu\nPasal 3\n(1) Pelaku dapat dikenai sanksi.\n(2) Sanksi ditetapkan oleh pimpinan perguruan ting-\ngi setelah pemeriksaan selesai.\n2\fPERATURAN CONTOH NOMOR 1 TAHUN 2024\nBAB II\nHAK KORBAN\nPasal 4\nKorban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. \n3\fPERATURAN CONTOH NOMOR 1 TAHUN 2024\nA. PENDAHULUAN\n1.1 Latar belakang masalah\nKekerasan seksual masih terjadi di lingkungan kampus dan perlu dicegah bersama.\n1.2 Tujuan penyusunan\nPedoman ini disusun sebagai acuan satgas.\n4\fPERATURAN CONTOH NOMOR 1 TAHUN 2024\nTeks lanjutan tanpa judul yang cukup pendek.\n5\fPERATURAN CONTOH NOMOR 1 TAHUN 2024\nPasal 5\nPenutup. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. \n6",
+  "expected": [
+   {
+    "id": "contoh-uji-0001",
+    "doc": "contoh-uji.pdf",
+    "cite": "Peraturan Contoh",
+    "section": "BAB I KETENTUAN UMUM > Pasal 1",
+    "page": "1",
+    "text": "Dalam peraturan ini yang dimaksud dengan: 1. Korban adalah orang yang mengalami kekerasan. 2. Pelapor adalah orang yang melaporkan kejadian kepada petugas yang berwenang.",
+    "ctext": "[Peraturan Contoh | BAB I KETENTUAN UMUM > Pasal 1 | hlm. 1]\nDalam peraturan ini yang dimaksud dengan: 1. Korban adalah orang yang mengalami kekerasan. 2. Pelapor adalah orang yang melaporkan kejadian kepada petugas yang berwenang."
+   },
+   {
+    "id": "contoh-uji-0002",
+    "doc": "contoh-uji.pdf",
+    "cite": "Peraturan Contoh",
+    "section": "BAB I KETENTUAN UMUM > Pasal 2",
+    "page": "2",
+    "text": "Setiap orang yang melakukan pelecehan seksual nonfisik dipidana penjara paling lama 9 (sembilan) bulan dan/atau denda paling banyak Rp10.000.000 (sepuluh juta rupiah).",
+    "ctext": "[Peraturan Contoh | BAB I KETENTUAN UMUM > Pasal 2 | hlm. 2]\nSetiap orang yang melakukan pelecehan seksual nonfisik dipidana penjara paling lama 9 (sembilan) bulan dan/atau denda paling banyak Rp10.000.000 (sepuluh juta rupiah)."
+   },
+   {
+    "id": "contoh-uji-0003",
+    "doc": "contoh-uji.pdf",
+    "cite": "Peraturan Contoh",
+    "section": "BAB I KETENTUAN UMUM > Bagian Kesatu > Pasal 3",
+    "page": "2",
+    "text": "(1) Pelaku dapat dikenai sanksi. (2) Sanksi ditetapkan oleh pimpinan perguruan tinggi setelah pemeriksaan selesai.",
+    "ctext": "[Peraturan Contoh | BAB I KETENTUAN UMUM > Bagian Kesatu > Pasal 3 | hlm. 2]\n(1) Pelaku dapat dikenai sanksi. (2) Sanksi ditetapkan oleh pimpinan perguruan tinggi setelah pemeriksaan selesai."
+   },
+   {
+    "id": "contoh-uji-0004",
+    "doc": "contoh-uji.pdf",
+    "cite": "Peraturan Contoh",
+    "section": "BAB II HAK KORBAN > Pasal 4",
+    "page": "3",
+    "text": "Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan.",
+    "ctext": "[Peraturan Contoh | BAB II HAK KORBAN > Pasal 4 | hlm. 3]\nKorban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan. Korban berhak atas penanganan, pelindungan, dan pemulihan."
+   },
+   {
+    "id": "contoh-uji-0005",
+    "doc": "contoh-uji.pdf",
+    "cite": "Peraturan Contoh",
+    "section": "A. PENDAHULUAN > 1.1 Latar belakang masalah",
+    "page": "4",
+    "text": "Kekerasan seksual masih terjadi di lingkungan kampus dan perlu dicegah bersama.",
+    "ctext": "[Peraturan Contoh | A. PENDAHULUAN > 1.1 Latar belakang masalah | hlm. 4]\nKekerasan seksual masih terjadi di lingkungan kampus dan perlu dicegah bersama."
+   },
+   {
+    "id": "contoh-uji-0006",
+    "doc": "contoh-uji.pdf",
+    "cite": "Peraturan Contoh",
+    "section": "A. PENDAHULUAN > 1.2 Tujuan penyusunan",
+    "page": "4",
+    "text": "Pedoman ini disusun sebagai acuan satgas. Teks lanjutan tanpa judul yang cukup pendek.",
+    "ctext": "[Peraturan Contoh | A. PENDAHULUAN > 1.2 Tujuan penyusunan | hlm. 4]\nPedoman ini disusun sebagai acuan satgas. Teks lanjutan tanpa judul yang cukup pendek."
+   },
+   {
+    "id": "contoh-uji-0007",
+    "doc": "contoh-uji.pdf",
+    "cite": "Peraturan Contoh",
+    "section": "BAB II HAK KORBAN > Pasal 5",
+    "page": "6",
+    "text": "Penutup. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen.",
+    "ctext": "[Peraturan Contoh | BAB II HAK KORBAN > Pasal 5 | hlm. 6]\nPenutup. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen. Isi akhir dokumen."
+   }
+  ]
+ }
+}

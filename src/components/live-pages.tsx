@@ -14,7 +14,7 @@ import {
   submitNewReport, uploadEvidenceMultipart, openConversation,
   postConversationMessage, fetchMessageAttachmentSignedUrl, fetchEvidenceSignedDownloadUrl, transitionReportStatusByAdmin,
   updateConversationStatusByAdmin, fetchMyProfile, updateMyProfileName, updateMyProfileWithAvatar,
-  fetchAiRagDocumentsByAdmin, addAiRagDocumentByAdmin, uploadAiRagPdfByAdmin, deleteAiRagDocumentByAdmin,
+  fetchAiRagDocumentsByAdmin, addAiRagDocumentByAdmin, uploadAiRagPdfByAdmin, deleteAiRagDocumentByAdmin, resetAiRagDocumentsByAdmin,
   fetchKnowledgeDocumentsByAdmin, uploadKnowledgePdfByAdmin, deleteKnowledgeDocumentByAdmin, triggerKnowledgeReindexByAdmin, fetchAuditEventsByAdmin,
   broadcastNotificationByAdmin, markConversationAsRead, markNotificationsReadByTarget, fetchConversations,
 } from "@/lib/api-client";
@@ -790,6 +790,7 @@ export function LiveAdminDocumentsPage(){
  const [loading,setLoading]=useState(false);
  const [saving,setSaving]=useState(false);
  const [deleting,setDeleting]=useState("");
+ const [resetting,setResetting]=useState(false);
 
  const load=useCallback(async()=>{
   setLoading(true);
@@ -868,8 +869,10 @@ export function LiveAdminDocumentsPage(){
  }
 
  async function remove(doc:SerializedAiRagDocument){
-  if(doc.source!=="web")return;
-  if(!window.confirm(`Hapus dokumen "${doc.cite}" (${doc.file}) dari sumber pengetahuan SISKA AI?`))return;
+  const message=doc.source==="web"
+   ?`Hapus dokumen "${doc.cite}" (${doc.file}) dari sumber pengetahuan SISKA AI?`
+   :`Hapus dokumen dasar "${doc.cite}" (${doc.file}) dari sumber pengetahuan SISKA AI? Dokumen akan disembunyikan dan dapat dikembalikan lewat tombol "Kembalikan ke bawaan".`;
+  if(!window.confirm(message))return;
   setDeleting(doc.file);
   setError("");
   setNotice("");
@@ -881,6 +884,22 @@ export function LiveAdminDocumentsPage(){
    setError(errorText(e));
   }finally{
    setDeleting("");
+  }
+ }
+
+ async function resetToDefault(){
+  if(!window.confirm("Kembalikan pengetahuan SISKA AI ke bawaan? Semua dokumen tambahan admin akan dihapus dan dokumen dasar yang pernah dihapus akan kembali."))return;
+  setResetting(true);
+  setError("");
+  setNotice("");
+  try{
+   const result=await resetAiRagDocumentsByAdmin();
+   setNotice(`Pengetahuan SISKA AI dikembalikan ke bawaan (${result.restoredBaseDocs} dokumen dasar dipulihkan, ${result.removedAddedDocs} dokumen tambahan dihapus).`);
+   await load();
+  }catch(e){
+   setError(errorText(e));
+  }finally{
+   setResetting(false);
   }
  }
 
@@ -925,10 +944,11 @@ export function LiveAdminDocumentsPage(){
      Dokumen Markdown (<code>.md</code>) dan teks (<code>.txt</code>) langsung dipecah menjadi potongan konteks (<em>chunks</em>) dan dibuat vektor <em>embedding</em>-nya oleh AI Service. Berkas PDF berteks diekstrak secara otomatis per halaman di backend sebelum diindeks.
     </p>
     <p className="help">
-     Perubahan indeks langsung aktif untuk pertanyaan pengguna berikutnya tanpa perlu menjalankan ulang notebook. PDF hasil pemindaian (<em>scan</em> gambar) memerlukan proses OCR terlebih dahulu sebelum diunggah.
+     Perubahan indeks langsung aktif untuk pertanyaan pengguna berikutnya tanpa perlu menjalankan ulang notebook. Dokumen dasar boleh dihapus satu per satu; hasil notebook tetap utuh sehingga semuanya dapat dikembalikan dengan "Kembalikan ke bawaan". PDF hasil pemindaian (<em>scan</em> gambar) memerlukan proses OCR terlebih dahulu sebelum diunggah.
     </p>
     <div className="row">
-     <button type="button" className="btn btn-outline" disabled={loading||saving} onClick={()=>void load()}>{loading?"Memuat…":"Muat ulang daftar"}</button>
+     <button type="button" className="btn btn-outline" disabled={loading||saving||resetting} onClick={()=>void load()}>{loading?"Memuat…":"Muat ulang daftar"}</button>
+     <button type="button" className="btn btn-outline" disabled={loading||saving||resetting} onClick={()=>void resetToDefault()}>{resetting?"Mengembalikan…":"Kembalikan ke bawaan"}</button>
     </div>
    </section>
   </div>
@@ -940,13 +960,9 @@ export function LiveAdminDocumentsPage(){
     <div key={doc.file} className="doc-row">
      <div style={{minWidth:0}}>
       <b>{doc.cite}</b>
-      <div className="help">{doc.file} • {doc.chunkCount} potongan • {doc.source==="web"?"Ditambahkan admin":"Sumber dasar (notebook)"}</div>
+      <div className="help">{doc.file} • {doc.chunkCount} potongan • {doc.source==="web"?"Ditambahkan admin":"Dokumen dasar"}</div>
      </div>
-     {doc.source==="web"?(
-      <button className="btn btn-outline btn-sm" disabled={deleting===doc.file} onClick={()=>void remove(doc)}>{deleting===doc.file?"Menghapus…":"Hapus"}<span className="sr-only"> {doc.cite}</span></button>
-     ):(
-      <span className="chip">Sumber dasar</span>
-     )}
+     <button className="btn btn-outline btn-sm" disabled={deleting===doc.file||resetting} onClick={()=>void remove(doc)}>{deleting===doc.file?"Menghapus…":"Hapus"}<span className="sr-only"> {doc.cite}</span></button>
     </div>
    ))}
   </section>

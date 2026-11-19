@@ -1,113 +1,85 @@
-import fs from 'fs';
-import path from 'path';
-import { chunkMarkdown } from './chunking.js';
+import { chunkDocument } from './chunking.js';
 import { embed } from './llm.js';
-import { loadIndex } from './indexStore.js';
-import { EXPORT_DIR } from '../config.js';
-function writeAtomic(file, data) {
-    const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, data);
-    fs.renameSync(tmp, file);
-}
-function chunksPath() {
-    return path.join(EXPORT_DIR, 'chunks.json');
-}
-function embPath() {
-    return path.join(EXPORT_DIR, 'embeddings.f32');
-}
-function manifestPath() {
-    return path.join(EXPORT_DIR, 'manifest.json');
-}
+import { loadIndex, loadBase } from './indexStore.js';
+import { readState, readAdded, writeRuntime, clearRuntime } from './runtimeStore.js';
+
 // Daftar Dokumen Indeks
 export function listDocs() {
     const idx = loadIndex();
     const byDoc = new Map();
-    for (const c of idx.chunks) {
-        const cur = byDoc.get(c.doc) || { cite: c.cite, count: 0 };
+    idx.chunks.forEach((c, i) => {
+        const cur = byDoc.get(c.doc) || { cite: c.cite, count: 0, web: i >= idx.baseChunkCount };
         cur.count += 1;
         byDoc.set(c.doc, cur);
-    }
-    const webDocs = new Set(readWebDocRegistry().map((d) => d.file));
-    return [...byDoc.entries()].map(([file, v]) => ({
-        file,
-        cite: v.cite,
-        chunkCount: v.count,
-        source: webDocs.has(file) ? 'web' : 'notebook',
-    }));
+    });
+    return [...byDoc.entries()].map(([file, v]) => ({ file, cite: v.cite, chunkCount: v.count, source: v.web ? 'web' : 'notebook' }));
 }
-function webDocRegistryPath() {
-    return path.join(EXPORT_DIR, 'web-docs.json');
-}
-export function readWebDocRegistry() {
-    try {
-        return JSON.parse(fs.readFileSync(webDocRegistryPath(), 'utf-8'));
-    }
-    catch {
-        return [];
-    }
-}
-function writeWebDocRegistry(list) {
-    fs.writeFileSync(webDocRegistryPath(), JSON.stringify(list, null, 2), 'utf-8');
-}
-function readAll() {
-    const idx = loadIndex(true);
-    return { chunks: idx.chunks, embFlat: idx.embeddings, manifest: idx.manifest };
-}
-function writeAll(chunks, embFlat, manifest) {
-    fs.mkdirSync(EXPORT_DIR, { recursive: true });
-    writeAtomic(chunksPath(), JSON.stringify(chunks));
-    writeAtomic(embPath(), Buffer.from(embFlat.buffer, embFlat.byteOffset, embFlat.byteLength));
-    const newManifest = { ...manifest, n: chunks.length, ids: chunks.map((c) => c.id) };
-    writeAtomic(manifestPath(), JSON.stringify(newManifest, null, 2));
-}
-// Tambah Dokumen Baru
+
+// Tambah Dokumen Baru (disimpan di folder runtime
 export async function addDocument(file, cite, content, embedBaseUrl) {
-    const { chunks, embFlat, manifest } = readAll();
-    if (chunks.some((c) => c.doc === file)) {
-        throw new Error(`Dokumen "${file}" sudah ada di index. Hapus dulu sebelum mengunggah ulang.`);
+    const idx = loadIndex();
+    if (idx.chunks.some((c) => c.doc === file)) {
+        throw new Error(`Dokumen "${file}" sudah ada di indeks. Hapus dulu sebelum mengunggah ulang.`);
     }
-    const newChunks = chunkMarkdown(content, { file, cite });
+    const size = idx.baseManifest.chunking;
+    const newChunks = chunkDocument(content, { file, cite }, { chunkChars: size?.chunk_chars, chunkMin: size?.chunk_min });
     if (!newChunks.length)
         throw new Error('Dokumen kosong setelah diproses -- tidak ada yang ditambahkan.');
     const vectors = await embed(embedBaseUrl, newChunks.map((c) => c.ctext));
-    if (vectors.length !== newChunks.length) {
+    if (vectors.length !== newChunks.length)
         throw new Error('Jumlah hasil embedding tidak sesuai jumlah chunk.');
-    }
-    const dim = manifest.dim || vectors[0].length;
+    const dim = idx.dim;
     if (vectors[0].length !== dim) {
-        throw new Error(`Dimensi embedding (${vectors[0].length}) tidak cocok dengan index saat ini (${dim}). ` +
-            `Pastikan model embed sama dengan "${manifest.model}".`);
+        throw new Error(`Dimensi embedding (${vectors[0].length}) tidak cocok dengan indeks saat ini (${dim}). ` +
+            `Pastikan model embed sama dengan "${idx.baseManifest.model}".`);
     }
-    const merged = new Float32Array(embFlat.length + newChunks.length * dim);
-    merged.set(embFlat, 0);
-    vectors.forEach((v, i) => merged.set(v, embFlat.length + i * dim));
-    const mergedChunks = [...chunks, ...newChunks];
-    writeAll(mergedChunks, merged, manifest);
-    const registry = readWebDocRegistry().filter((d) => d.file !== file);
-    registry.push({ file, cite, addedAt: new Date().toISOString() });
-    writeWebDocRegistry(registry);
+    const cur = readAdded(dim);
+    const merged = new Float32Array(cur.vectors.length + newChunks.length * dim);
+    merged.set(cur.vectors, 0);
+    vectors.forEach((v, i) => merged.set(v, cur.vectors.length + i * dim));
+    const state = readState();
+    state.added = state.added.filter((d) => d.file !== file);
+    state.added.push({ file, cite, chunkCount: newChunks.length, addedAt: new Date().toISOString() });
+    writeRuntime(state, [...cur.chunks, ...newChunks], merged);
     loadIndex(true);
     return { addedChunks: newChunks.length };
 }
-// Hapus Dokumen Indeks
+
+// Hapus Dokumen
 export async function deleteDocument(file) {
-    const { chunks, embFlat, manifest } = readAll();
-    const dim = manifest.dim;
-    const keepIdx = [];
-    chunks.forEach((c, i) => {
-        if (c.doc !== file)
-            keepIdx.push(i);
-    });
-    const removed = chunks.length - keepIdx.length;
-    if (removed === 0)
-        throw new Error(`Tidak ada chunk untuk dokumen "${file}".`);
-    const keptChunks = keepIdx.map((i) => chunks[i]);
-    const keptEmb = new Float32Array(keepIdx.length * dim);
-    keepIdx.forEach((srcI, dstI) => {
-        keptEmb.set(embFlat.subarray(srcI * dim, srcI * dim + dim), dstI * dim);
-    });
-    writeAll(keptChunks, keptEmb, manifest);
-    writeWebDocRegistry(readWebDocRegistry().filter((d) => d.file !== file));
+    const idx = loadIndex();
+    const state = readState();
+    if (state.added.some((d) => d.file === file)) {
+        const dim = idx.dim;
+        const cur = readAdded(dim);
+        const keepIdx = [];
+        cur.chunks.forEach((c, i) => {
+            if (c.doc !== file)
+                keepIdx.push(i);
+        });
+        const removed = cur.chunks.length - keepIdx.length;
+        const vec = new Float32Array(keepIdx.length * dim);
+        keepIdx.forEach((src, dst) => vec.set(cur.vectors.subarray(src * dim, src * dim + dim), dst * dim));
+        state.added = state.added.filter((d) => d.file !== file);
+        writeRuntime(state, keepIdx.map((i) => cur.chunks[i]), vec);
+        loadIndex(true);
+        return { removedChunks: removed };
+    }
+    const base = loadBase();
+    const count = base.chunks.filter((c) => c.doc === file).length;
+    if (!count || state.removed.includes(file))
+        throw new Error(`Tidak ada dokumen "${file}" di indeks.`);
+    state.removed.push(file);
+    const cur = readAdded(idx.dim);
+    writeRuntime(state, cur.chunks, cur.vectors);
     loadIndex(true);
-    return { removedChunks: removed };
+    return { removedChunks: count };
+}
+
+// Kembalikan ke Bawaan
+export async function resetRuntime() {
+    const before = readState();
+    clearRuntime();
+    loadIndex(true);
+    return { restoredBaseDocs: before.removed.length, removedAddedDocs: before.added.length };
 }

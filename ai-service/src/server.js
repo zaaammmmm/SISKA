@@ -2,13 +2,13 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import {
-  PORT, HOST, SHARED_SECRET, ALLOW_NO_AUTH, MAX_BODY_BYTES, SESSION_MAX, SESSION_TTL_MS,
+  PORT, HOST, SHARED_SECRET, ALLOW_NO_AUTH, MAX_BODY_BYTES, SESSION_MAX, SESSION_TTL_MS, DEBUG_ENABLED,
 } from './config.js';
 import { answer, invalidateRetrievalCache } from './rag/rag.js';
-import { loadIndex } from './rag/indexStore.js';
+import { loadIndex, indexInfo } from './rag/indexStore.js';
 import { pingOllama, hasModel, chatModel, embedModel } from './rag/llm.js';
 import { getSettings, setSettings, resolveBaseUrl } from './rag/settingsStore.js';
-import { listDocs, addDocument, deleteDocument, readWebDocRegistry } from './rag/docStore.js';
+import { listDocs, addDocument, deleteDocument, resetRuntime } from './rag/docStore.js';
 import { SessionStore } from './rag/sessions.js';
 import { toContractResponse } from './contract.js';
 
@@ -108,7 +108,9 @@ async function handleChat(req, requestId) {
     throw new HttpError(503, 'LLM_UNAVAILABLE', 'Model bahasa tidak terjangkau.');
   }
   sessions.set(key, result.history);
-  return toContractResponse(result);
+  const contract = toContractResponse(result);
+  if (DEBUG_ENABLED && req.headers['x-debug'] === '1') return { ...contract, debug: result.debug };
+  return contract;
 }
 
 // Handler Endpoint Health
@@ -125,6 +127,8 @@ async function handleHealth() {
     chunkCount,
     llmReachable: ollama.up,
     // Informasi saja (tidak mengubah `status`): apakah model chat/embedding sudah di-pull di Ollama.
+    chatModel: chatModel(),
+    index: indexOk ? indexInfo() : null,
     chatModelLoaded: ollama.up ? hasModel(ollama.models, chatModel()) : false,
     embeddingModelLoaded: ollama.up ? hasModel(ollama.models, embedModel()) : false,
     backend: settings.backend,
@@ -165,12 +169,19 @@ async function route(req, res, requestId) {
       return send(res, 200, { ok: true, ...out }, requestId);
     }
     if (m === 'DELETE') {
-      const file = url.searchParams.get('file');
-      if (!file) throw new HttpError(400, 'VALIDATION_ERROR', 'Parameter ?file= wajib diisi.');
-      if (!readWebDocRegistry().some((doc) => doc.file === file)) {
-        throw new HttpError(403, 'FORBIDDEN', 'Dokumen sumber notebook tidak dapat dihapus dari pengelolaan dokumen admin.');
+      if (url.searchParams.get('reset') === '1') {
+        const out = await resetRuntime();
+        invalidateRetrievalCache();
+        return send(res, 200, { ok: true, ...out }, requestId);
       }
-      const out = await deleteDocument(file);
+      const file = url.searchParams.get('file');
+      if (!file) throw new HttpError(400, 'VALIDATION_ERROR', 'Parameter ?file= atau ?reset=1 wajib diisi.');
+      let out;
+      try {
+        out = await deleteDocument(file);
+      } catch (e) {
+        throw new HttpError(404, 'NOT_FOUND', String(e.message || e));
+      }
       invalidateRetrievalCache();
       return send(res, 200, { ok: true, ...out }, requestId);
     }
