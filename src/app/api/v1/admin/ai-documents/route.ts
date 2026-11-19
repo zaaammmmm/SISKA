@@ -22,7 +22,7 @@ import type { SerializedAiRagDocument } from '@/types/api';
 
 const DOCUMENT_KEYS = ['file', 'cite', 'content'] as const;
 const FILE_NAME_RX = /^[\w .()-]{1,120}\.(?:md|txt|pdf)$/i;
-export const AI_DOCUMENT_MAX_TEXT_CHARS = 300_000;
+const AI_DOCUMENT_MAX_TEXT_CHARS = 300_000;
 
 export const runtime = 'nodejs';
 
