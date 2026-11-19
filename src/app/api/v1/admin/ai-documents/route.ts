@@ -17,10 +17,6 @@ import {
 } from '@/server/validators/common';
 import { recordAuditEvent } from '@/server/services/audit.service';
 import { extractAiPdfText } from '@/server/services/ai-pdf-extractor';
-import {
-  registerAiRagPdfInKnowledgeBase,
-  removeAiRagDocumentFromKnowledgeBase,
-} from '@/server/services/knowledge.service';
 import { validateKnowledgePdfFormData } from '@/server/validators';
 import type { SerializedAiRagDocument } from '@/types/api';
 
@@ -82,14 +78,12 @@ export const POST = withAuthenticatedRoute(
     let file: string;
     let cite: string;
     let content: string;
-    let pdfBytes: Uint8Array | null = null;
 
     if (request.headers.get('content-type')?.includes('multipart/form-data')) {
       const upload = await validateKnowledgePdfFormData(await request.formData());
       file = validateFileName(upload.fileName);
       cite = upload.title;
       content = await extractAiPdfText(upload.bytes, cite);
-      pdfBytes = upload.bytes;
     } else {
       const body = await parseJsonObject(request);
       assertAllowlistedKeys(body, DOCUMENT_KEYS, 'dokumen SISKA AI');
@@ -104,27 +98,6 @@ export const POST = withAuthenticatedRoute(
       { file, cite, content },
       requestId,
     );
-    const chunkCount = result.addedChunks ?? 0;
-
-    // PDF juga dicatat di Firestore (knowledgeDocuments) beserta berkas aslinya di storage.
-    // Bila pencatatan gagal, batalkan indeks agar AI Service dan Firestore tetap konsisten.
-    if (pdfBytes) {
-      try {
-        await registerAiRagPdfInKnowledgeBase({
-          caller,
-          file,
-          title: cite,
-          bytes: pdfBytes,
-          chunkCount,
-        });
-      } catch (error) {
-        await deleteRemoteAiRagDocument(file, requestId).catch(
-          () => undefined,
-        );
-        throw error;
-      }
-    }
-
     await recordAuditEvent({
       actorUid: caller.uid,
       action: 'kb.document_uploaded',
@@ -134,7 +107,7 @@ export const POST = withAuthenticatedRoute(
     });
 
     return jsonSuccess<SerializedAiRagDocument>(
-      { file, cite, chunkCount, source: 'web' },
+      { file, cite, chunkCount: result.addedChunks ?? 0, source: 'web' },
       requestId,
       201,
     );
@@ -151,13 +124,6 @@ export const DELETE = withAuthenticatedRoute(
     const file = validateFileName(body.file);
 
     const result = await deleteRemoteAiRagDocument(file, requestId);
-    // Hapus juga catatan Firestore dan berkas PDF. Indeks sudah terhapus, jadi kegagalan di sini hanya dicatat.
-    await removeAiRagDocumentFromKnowledgeBase(file).catch((error) => {
-      console.error(
-        `[ai-documents] gagal menghapus catatan Firestore untuk ${file}:`,
-        error,
-      );
-    });
     await recordAuditEvent({
       actorUid: caller.uid,
       action: 'kb.document_deleted',

@@ -115,8 +115,6 @@ export interface KnowledgeDocument {
   chunkCount: number;
   version: number;
   errorCode?: string | null;
-  /** Nama berkas sumber di indeks RAG AI Service (hanya untuk dokumen dari halaman Dokumen SISKA AI). */
-  ragFile?: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 }

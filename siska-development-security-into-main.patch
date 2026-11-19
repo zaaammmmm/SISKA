@@ -1,0 +1,3209 @@
+diff --git a/.env.example b/.env.example
+index 51c9db9..21e3a84 100644
+--- a/.env.example
++++ b/.env.example
+@@ -34,3 +34,11 @@ AI_SERVICE_ENABLE_REMOTE="true"
+ AI_SERVICE_URL="http://127.0.0.1:8000"
+ AI_SERVICE_SHARED_SECRET="ganti-dengan-secret-acak-panjang"
+ AI_SERVICE_TIMEOUT_MS="90000"
++
++# ── 5. Media & Evidence Storage Provider (Cloudinary Free Tier / Firebase) ─
++# Pilihan: "auto" (default: Cloudinary di cloud, Emulator di lokal), "cloudinary", atau "firebase"
++STORAGE_PROVIDER="auto"
++CLOUDINARY_CLOUD_NAME=""
++CLOUDINARY_API_KEY=""
++CLOUDINARY_API_SECRET=""
++CLOUDINARY_UPLOAD_FOLDER="siska"
+diff --git a/next.config.ts b/next.config.ts
+index 6497da5..98583c2 100644
+--- a/next.config.ts
++++ b/next.config.ts
+@@ -4,9 +4,9 @@ const cspDirectives = [
+   "default-src 'self'",
+   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com",
+   "style-src 'self' 'unsafe-inline'",
+-  "img-src 'self' data: blob: https://*.googleapis.com https://*.firebasestorage.app http://127.0.0.1:9199 http://localhost:9199",
++  "img-src 'self' data: blob: https://res.cloudinary.com https://*.googleapis.com https://*.firebasestorage.app http://127.0.0.1:9199 http://localhost:9199",
+   "font-src 'self' data:",
+-  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebasestorage.app wss://*.firebaseio.com http://127.0.0.1:8085 http://127.0.0.1:9099 http://127.0.0.1:9199 http://localhost:8085 http://localhost:9099 http://localhost:9199",
++  "connect-src 'self' https://api.cloudinary.com https://res.cloudinary.com https://*.googleapis.com https://*.firebaseio.com https://*.firebasestorage.app wss://*.firebaseio.com http://127.0.0.1:8085 http://127.0.0.1:9099 http://127.0.0.1:9199 http://localhost:8085 http://localhost:9099 http://localhost:9199",
+   "frame-src 'self' https://*.firebaseapp.com http://127.0.0.1:9099 http://localhost:9099",
+   "object-src 'none'",
+   "base-uri 'self'",
+diff --git a/package.json b/package.json
+index 67f2c0d..6a50a58 100644
+--- a/package.json
++++ b/package.json
+@@ -11,7 +11,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "tsc --noEmit",
+-    "test": "node --experimental-strip-types --import ./src/tests/ts-alias-loader.mjs --test src/tests/unit/backend-test-plan.test.mjs src/tests/unit/ai-reply.test.mjs src/tests/unit/ai-pdf-extractor.test.mjs src/tests/unit/education-notification.test.mjs src/tests/unit/authz-canonical-fields.test.mjs",
++    "test": "node --experimental-strip-types --import ./src/tests/ts-alias-loader.mjs --test src/tests/unit/backend-test-plan.test.mjs src/tests/unit/ai-reply.test.mjs src/tests/unit/ai-pdf-extractor.test.mjs src/tests/unit/education-notification.test.mjs src/tests/unit/authz-canonical-fields.test.mjs src/tests/unit/cloudinary-integration.test.mjs",
+     "seed:dry": "node seed.mjs --dry-run",
+     "seed": "node seed.mjs --emulator",
+     "seed:reset": "node seed.mjs --emulator --reset",
+diff --git a/src/app/api/v1/conversations/[id]/messages/[messageId]/attachment/route.ts b/src/app/api/v1/conversations/[id]/messages/[messageId]/attachment/route.ts
+new file mode 100644
+index 0000000..8269df7
+--- /dev/null
++++ b/src/app/api/v1/conversations/[id]/messages/[messageId]/attachment/route.ts
+@@ -0,0 +1,25 @@
++import { withAuthenticatedRoute } from '@/server/authz/route-handler';
++import { jsonSuccess } from '@/server/errors/api-error';
++import { authorizeMessageAttachmentDownload } from '@/server/services/conversation.service';
++import { validateResourceId } from '@/server/validators';
++
++interface MessageAttachmentRouteParams {
++  id: string;
++  messageId: string;
++}
++
++// GET /api/v1/conversations/[id]/messages/[messageId]/attachment
++export const GET = withAuthenticatedRoute<MessageAttachmentRouteParams>(
++  async ({ requestId, caller, params }) => {
++    const conversationId = validateResourceId(params.id, 'conversationId');
++    const messageId = validateResourceId(params.messageId, 'messageId');
++    const signed = await authorizeMessageAttachmentDownload(
++      caller,
++      conversationId,
++      messageId,
++      requestId,
++    );
++    return jsonSuccess(signed, requestId, 200);
++  },
++  { roles: ['reporter', 'admin'] },
++);
+diff --git a/src/app/api/v1/conversations/[id]/messages/route.ts b/src/app/api/v1/conversations/[id]/messages/route.ts
+index 9fe9333..6c6dece 100644
+--- a/src/app/api/v1/conversations/[id]/messages/route.ts
++++ b/src/app/api/v1/conversations/[id]/messages/route.ts
+@@ -7,6 +7,7 @@ import {
+ import { listMessages, sendMessage } from '@/server/services/conversation.service';
+ import {
+   parseJsonObject,
++  validateMultipartSendMessageInput,
+   validatePaginationParams,
+   validateResourceId,
+   validateSendMessageInput,
+@@ -32,6 +33,15 @@ export const POST = withAuthenticatedRoute<ConversationMessagesRouteParams>(
+   async ({ request, requestId, caller, params }) => {
+     enforceRateLimit(caller.uid, RATE_LIMIT_POLICIES.SEND_MESSAGE);
+     const conversationId = validateResourceId(params.id, 'conversationId');
++    const contentTypeHeader = request.headers.get('content-type') || '';
++
++    if (contentTypeHeader.toLowerCase().includes('multipart/form-data')) {
++      const formData = await request.formData();
++      const input = await validateMultipartSendMessageInput(formData);
++      const created = await sendMessage(caller, conversationId, input);
++      return jsonSuccess(created, requestId, 201);
++    }
++
+     const rawBody = await parseJsonObject(request);
+     const input = validateSendMessageInput(rawBody);
+     const created = await sendMessage(caller, conversationId, input);
+diff --git a/src/app/api/v1/health/route.ts b/src/app/api/v1/health/route.ts
+index b20d874..70613a3 100644
+--- a/src/app/api/v1/health/route.ts
++++ b/src/app/api/v1/health/route.ts
+@@ -1,4 +1,6 @@
+ import { NextRequest } from 'next/server';
++import { resolveActiveStorageProvider } from '@/lib/cloudinary';
++import { isFirebaseEmulatorMode } from '@/lib/firebase/admin';
+ import { resolveAiServiceConfig } from '@/server/contracts/ai-service.contract';
+ import { jsonSuccess, resolveRequestId } from '@/server/errors/api-error';
+ 
+@@ -6,6 +8,7 @@ import { jsonSuccess, resolveRequestId } from '@/server/errors/api-error';
+ export async function GET(request: NextRequest) {
+   const requestId = resolveRequestId(request);
+   const aiConfig = resolveAiServiceConfig();
++  const activeStorage = resolveActiveStorageProvider();
+ 
+   return jsonSuccess(
+     {
+@@ -15,6 +18,12 @@ export async function GET(request: NextRequest) {
+       aiEngineMode: aiConfig.enabled
+         ? 'remote_ai_service_rag'
+         : 'local_firestore_rag',
++      storageProvider:
++        activeStorage === 'cloudinary'
++          ? 'cloudinary'
++          : isFirebaseEmulatorMode()
++            ? 'firebase_emulator'
++            : 'firebase_storage',
+       timestamp: new Date().toISOString(),
+     },
+     requestId,
+diff --git a/src/app/api/v1/profile/route.ts b/src/app/api/v1/profile/route.ts
+index fd91c44..8175df3 100644
+--- a/src/app/api/v1/profile/route.ts
++++ b/src/app/api/v1/profile/route.ts
+@@ -10,6 +10,7 @@ import {
+ } from '@/server/services/profile.service';
+ import {
+   parseJsonObject,
++  validateMultipartUpdateProfileInput,
+   validateUpdateProfileInput,
+ } from '@/server/validators';
+ 
+@@ -25,6 +26,19 @@ export const GET = withAuthenticatedRoute(
+ // PATCH /api/v1/profile
+ export const PATCH = withAuthenticatedRoute(
+   async ({ request, requestId, caller }) => {
++    const contentTypeHeader = request.headers.get('content-type') || '';
++
++    if (contentTypeHeader.toLowerCase().includes('multipart/form-data')) {
++      const currentProfile = await getMyProfile(caller);
++      const formData = await request.formData();
++      const input = await validateMultipartUpdateProfileInput(
++        formData,
++        currentProfile.displayName,
++      );
++      const updated = await updateMyProfile(caller, input, requestId);
++      return jsonSuccess(updated, requestId, 200);
++    }
++
+     const rawBody = await parseJsonObject(request);
+     const input = validateUpdateProfileInput(rawBody);
+     const updated = await updateMyProfile(caller, input, requestId);
+diff --git a/src/components/live-pages.tsx b/src/components/live-pages.tsx
+index ab48136..d9c86bb 100644
+--- a/src/components/live-pages.tsx
++++ b/src/components/live-pages.tsx
+@@ -6,18 +6,19 @@ import { collection, doc, onSnapshot, orderBy, query, where, type Unsubscribe }
+ import { useRouter, useSearchParams } from "next/navigation";
+ import { EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, updatePassword, updateProfile } from "firebase/auth";
+ import { auth, db } from "@/lib/firebase/client";
++import { withBasePath } from "@/lib/base-path";
+ import { AppShell } from "@/components/shell";
+ import { AiChatPanel } from "@/components/ai-chat";
+ import {
+   SiskaApiClientError, fetchReportsPage, fetchReportsSummary, fetchReportDetail,
+   submitNewReport, uploadEvidenceMultipart, openConversation,
+-  postConversationMessage, transitionReportStatusByAdmin,
+-  updateConversationStatusByAdmin, fetchMyProfile, updateMyProfileName,
++  postConversationMessage, fetchMessageAttachmentSignedUrl, fetchEvidenceSignedDownloadUrl, transitionReportStatusByAdmin,
++  updateConversationStatusByAdmin, fetchMyProfile, updateMyProfileName, updateMyProfileWithAvatar,
+   fetchKnowledgeDocumentsByAdmin, uploadKnowledgePdfByAdmin, deleteKnowledgeDocumentByAdmin, triggerKnowledgeReindexByAdmin, fetchAuditEventsByAdmin,
+   broadcastNotificationByAdmin, markConversationAsRead, markNotificationsReadByTarget, fetchConversations,
+ } from "@/lib/api-client";
+ import { useUnreadSummary } from "@/lib/use-unread-summary";
+-import type { SerializedReport, SerializedReportDetail, SerializedConversation, SerializedMessage, ReportsSummaryResult, SerializedKnowledgeDocument, SerializedAuditEvent } from "@/types/api";
++import type { SerializedReport, SerializedReportDetail, SerializedConversation, SerializedMessage, ReportsSummaryResult, SerializedKnowledgeDocument, SerializedAuditEvent, SignedDownloadUrlResult } from "@/types/api";
+ import { ALLOWED_STATUS_TRANSITIONS, isStatusNoteRequired, type ReportStatus } from "@/types/domain";
+ 
+ const STATUS: Record<ReportStatus, string> = {
+@@ -202,12 +203,15 @@ export function LiveHistoryPage({admin=false}:{admin?:boolean}) {
+ 
+ function Detail({id,admin}:{id:string;admin:boolean}) {
+  const [report,setReport]=useState<SerializedReportDetail|null>(null);const [error,setError]=useState("");const [busy,setBusy]=useState(false);const [uploadBusy,setUploadBusy]=useState(false);const [next,setNext]=useState<ReportStatus>("under_review");const [note,setNote]=useState("");
++ const [previews,setPreviews]=useState<Record<string,SignedDownloadUrlResult&{revealed?:boolean}>>({});
+  const load=useCallback(async()=>{try{setError("");const r=await fetchReportDetail(id);setReport(r);setNext(r.status==="submitted"?"under_review":r.status==="under_review"?"in_progress":"resolved");}catch(e){setError(errorText(e));}},[id]);useEffect(()=>{void load();},[load]);
+  // Membuka detail laporan = membaca pembaruannya. Badge sidebar/lonceng turun tanpa menunggu klik lonceng.
+  const reportStatus=report?.status;
+  useEffect(()=>{if(!reportStatus)return;void markNotificationsReadByTarget("report",id).catch(()=>undefined);},[id,reportStatus]);
+  async function update(e:React.FormEvent){e.preventDefault();if(!report)return;setBusy(true);setError("");try{await transitionReportStatusByAdmin(id,{status:next,note:note.trim()||undefined});await load();setNote("");}catch(e){setError(errorText(e));}finally{setBusy(false);}}
+- async function download(evidenceId:string){try{const {url}=await (await import("@/lib/api-client")).fetchEvidenceSignedDownloadUrl(id,evidenceId);window.open(url,"_blank","noopener,noreferrer");}catch(e){setError(errorText(e));}}
++ async function download(evidenceId:string){try{const {url}=await fetchEvidenceSignedDownloadUrl(id,evidenceId);window.open(url,"_blank","noopener,noreferrer");}catch(e){setError(errorText(e));}}
++ async function previewPhoto(evidenceId:string){try{setError("");const res=await fetchEvidenceSignedDownloadUrl(id,evidenceId);setPreviews(old=>({...old,[evidenceId]:{...res,revealed:false}}));}catch(e){setError(errorText(e));}}
++ function toggleReveal(evidenceId:string){setPreviews(old=>old[evidenceId]?{...old,[evidenceId]:{...old[evidenceId],revealed:!old[evidenceId].revealed}}:old);}
+  async function uploadEvidence(file:File){setUploadBusy(true);setError("");try{await uploadEvidenceMultipart(id,file);await load();}catch(e){setError(errorText(e));}finally{setUploadBusy(false);}}
+  return (
+   <AppShell role={admin?"admin":"user"}>
+@@ -226,7 +230,28 @@ function Detail({id,admin}:{id:string;admin:boolean}) {
+           <section className="detail-block"><h3>Kronologi</h3><p className="body">{report.description}</p></section>
+           <section className="detail-block">
+             <h3>Bukti pendukung</h3>
+-            {report.evidence.length?<div className="file-list">{report.evidence.map(x=><div key={x.id} className="file-item"><span>{x.originalName}<span className="size">{(x.sizeBytes/1024).toFixed(0)} KB</span></span><button className="btn btn-outline btn-sm" onClick={()=>void download(x.id)}>Unduh<span className="sr-only"> {x.originalName}</span></button></div>)}</div>:<p className="help">Belum ada bukti.</p>}
++            {report.evidence.length?<div className="file-list">{report.evidence.map(x=>{
++              const isPhoto=x.contentType==="image/jpeg"||x.contentType==="image/png";
++              const pv=previews[x.id];
++              const imgSrc=pv?(pv.revealed?(pv.previewUrl||pv.url):(pv.blurredPreviewUrl||pv.previewUrl||pv.url)):"";
++              return (
++              <div key={x.id} className="stack" style={{gap:8}}>
++                <div className="file-item">
++                  <span>{x.originalName}<span className="size">{(x.sizeBytes/1024).toFixed(0)} KB</span></span>
++                  <div className="row" style={{gap:8}}>
++                    {isPhoto&&<button type="button" className="btn btn-outline btn-sm" onClick={()=>pv?toggleReveal(x.id):void previewPhoto(x.id)}>{!pv?"Pratinjau Aman":pv.revealed?"Sembunyikan/Blur":"Tampilkan Jelas"}</button>}
++                    <button type="button" className="btn btn-outline btn-sm" onClick={()=>void download(x.id)}>Unduh<span className="sr-only"> {x.originalName}</span></button>
++                  </div>
++                </div>
++                {pv&&imgSrc&&(
++                  <div className="card" style={{padding:12}}>
++                    <img src={imgSrc} alt={`Pratinjau bukti ${x.originalName}`} style={{maxWidth:"100%",maxHeight:320,borderRadius:8,objectFit:"contain",filter:!pv.revealed&&!pv.blurredPreviewUrl?"blur(18px)":"none",transition:"filter 0.2s ease"}}/>
++                    <p className="help" style={{marginTop:6}}>{pv.revealed?"Pratinjau foto (metadata EXIF/GPS telah dibersihkan).":"Pratinjau disamarkan untuk kenyamanan visual. Klik 'Tampilkan Jelas' untuk melihat foto."}</p>
++                  </div>
++                )}
++              </div>
++              );
++            })}</div>:<p className="help">Belum ada bukti.</p>}
+             {!admin&&<label className="field" style={{marginTop:16}}><span className="label">Tambah bukti <em className="opt">PDF, JPG, PNG, maks. 5 MiB</em></span><input type="file" accept="application/pdf,image/jpeg,image/png" disabled={uploadBusy} onChange={e=>{const file=e.target.files?.[0];if(file)void uploadEvidence(file);e.currentTarget.value="";}}/>{uploadBusy&&<span className="help" role="status">Mengunggah bukti…</span>}</label>}
+           </section>
+           <section className="detail-block">
+@@ -289,6 +314,7 @@ function ConversationChat({admin}:{admin:boolean}) {
+  const [reporterNames,setReporterNames]=useState<Record<string,string>>({});
+  const [currentUid,setCurrentUid]=useState("");
+  const [text,setText]=useState("");
++ const [chatFile,setChatFile]=useState<File|null>(null);
+  const [error,setError]=useState("");
+  const [notice,setNotice]=useState("");
+  const [loading,setLoading]=useState(true);
+@@ -579,17 +605,27 @@ function ConversationChat({admin}:{admin:boolean}) {
+ 
+  async function send(e:React.FormEvent){
+   e.preventDefault();
+-  const body=text.trim();
++  const body=text.trim()||(chatFile?`[Lampiran: ${chatFile.name}]`:"");
+   if(!active||!body||!current||current.status!=="open")return;
+   setBusy(true);setError("");
+   try{
+-   await postConversationMessage(active,body);
++   await postConversationMessage(active,body,chatFile);
+    // Jangan append hasil API ke state lokal: onSnapshot akan menerima dokumen yang sudah committed.
+    setText("");
++   setChatFile(null);
+   }catch(cause){setError(errorText(cause));}
+   finally{setBusy(false);}
+  }
+ 
++ async function openMessageAttachment(messageId:string){
++  if(!active)return;
++  try{
++   setError("");
++   const signed=await fetchMessageAttachmentSignedUrl(active,messageId);
++   window.open(signed.previewUrl||signed.url,"_blank","noopener,noreferrer");
++  }catch(cause){setError(errorText(cause));}
++ }
++
+  async function toggleStatus(){
+   if(!current)return;
+   setStatusBusy(true);setError("");
+@@ -625,13 +661,23 @@ function ConversationChat({admin}:{admin:boolean}) {
+       const author=isReporter?(admin?reporterName:"Anda"):"Admin SISKA";
+       return <Fragment key={message.id}>
+        {unreadMarker?.firstId===message.id&&<div className="unread-divider" role="separator" aria-label={`${unreadMarker.count} pesan belum terbaca`}><span>{unreadMarker.count} pesan belum terbaca</span></div>}
+-       <div className={`bubble ${isMine?"me":"them"}`}><div className="who">{author}<span>{dateText(message.createdAt)}</span></div>{message.body}</div>
++       <div className={`bubble ${isMine?"me":"them"}`}><div className="who">{author}<span>{dateText(message.createdAt)}</span></div><div>{message.body}</div>{message.attachmentPath&&<div style={{marginTop:8}}><button type="button" className="btn btn-outline btn-sm" onClick={()=>void openMessageAttachment(message.id)}>Lihat / Unduh Lampiran</button></div>}</div>
+       </Fragment>;
+      })}
+      {!messages.length&&<p className="help">{current?"Belum ada pesan. Mulai percakapan dengan mengirim pesan.":"Pilih percakapan untuk melihat pesan."}</p>}
+      {newBelow>0&&<button type="button" className="jump-latest" onClick={()=>scrollToBottom(true)}>↓ {newBelow} pesan baru</button>}
+     </div>
+-    <form className="compose" onSubmit={send}><div className="compose-row"><input type="text" aria-label="Tulis pesan" value={text} onChange={event=>setText(event.target.value)} maxLength={10000} placeholder={current?.status==="closed"?"Percakapan ini sudah ditutup":"Tulis pesan…"} disabled={!current||current.status==="closed"||busy}/><button className="btn btn-primary btn-sm" disabled={!current||current.status==="closed"||busy||!text.trim()}>Kirim</button></div></form>
++    <form className="compose" onSubmit={send}>
++     {chatFile&&<div className="row" style={{marginBottom:8,fontSize:12}}><span>Lampiran: <b>{chatFile.name}</b> ({(chatFile.size/1024).toFixed(0)} KB)</span><button type="button" className="link-teal" onClick={()=>setChatFile(null)}>Hapus</button></div>}
++     <div className="compose-row">
++      <input type="text" aria-label="Tulis pesan" value={text} onChange={event=>setText(event.target.value)} maxLength={10000} placeholder={current?.status==="closed"?"Percakapan ini sudah ditutup":"Tulis pesan atau lampirkan foto…"} disabled={!current||current.status==="closed"||busy}/>
++      <label className="btn btn-outline btn-sm" style={{cursor:!current||current.status==="closed"||busy?"not-allowed":"pointer"}}>
++       Lampirkan Foto
++       <input type="file" hidden accept="image/jpeg,image/png,application/pdf" disabled={!current||current.status==="closed"||busy} onChange={e=>{const f=e.target.files?.[0];if(f){if(f.size>5*1024*1024){setError("Ukuran lampiran maksimal 5 MiB.");}else{setChatFile(f);}}e.currentTarget.value="";}}/>
++      </label>
++      <button className="btn btn-primary btn-sm" disabled={!current||current.status==="closed"||busy||(!text.trim()&&!chatFile)}>Kirim</button>
++     </div>
++    </form>
+    </section>
+   </div>
+  </AppShell>;
+@@ -785,10 +831,10 @@ export function LiveAdminAuditPage(){
+ }
+ 
+ export function LiveProfilePage(){
+- const [name,setName]=useState("");const [email,setEmail]=useState("");const [role,setRole]=useState("");const [error,setError]=useState("");const [message,setMessage]=useState("");const [busy,setBusy]=useState(false);
++ const [name,setName]=useState("");const [email,setEmail]=useState("");const [role,setRole]=useState("");const [photoUrl,setPhotoUrl]=useState<string|null>(null);const [avatarFile,setAvatarFile]=useState<File|null>(null);const [error,setError]=useState("");const [message,setMessage]=useState("");const [busy,setBusy]=useState(false);
+  const [currentPassword,setCurrentPassword]=useState("");const [newPassword,setNewPassword]=useState("");const [confirmPassword,setConfirmPassword]=useState("");
+- useEffect(()=>{fetchMyProfile().then(p=>{setName(p.displayName);setEmail(p.email);setRole(p.role);}).catch(e=>setError(errorText(e)));},[]);
+- async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");setMessage("");try{const p=await updateMyProfileName(name.trim());if(auth?.currentUser) await updateProfile(auth.currentUser,{displayName:p.displayName});setName(p.displayName);setMessage("Nama profil berhasil diperbarui.");}catch(e){setError(errorText(e));}finally{setBusy(false);}}
++ useEffect(()=>{fetchMyProfile().then(p=>{setName(p.displayName);setEmail(p.email);setRole(p.role);setPhotoUrl(p.photoUrl??null);}).catch(e=>setError(errorText(e)));},[]);
++ async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");setMessage("");try{const p=await updateMyProfileWithAvatar({displayName:name.trim(),avatarFile});if(auth?.currentUser) await updateProfile(auth.currentUser,{displayName:p.displayName,...(p.photoUrl?{photoURL:p.photoUrl}:{})});setName(p.displayName);if(p.photoUrl)setPhotoUrl(p.photoUrl);setAvatarFile(null);setMessage(avatarFile?"Profil dan foto berhasil diperbarui.":"Nama profil berhasil diperbarui.");}catch(e){setError(errorText(e));}finally{setBusy(false);}}
+  async function changePassword(e:React.FormEvent){e.preventDefault();setError("");setMessage("");if(newPassword.length<6){setError("Password baru minimal 6 karakter.");return;}if(newPassword!==confirmPassword){setError("Konfirmasi password tidak sama.");return;}const user=auth?.currentUser;if(!user?.email){setError("Sesi akun tidak ditemukan. Silakan login ulang.");return;}setBusy(true);try{await reauthenticateWithCredential(user,EmailAuthProvider.credential(user.email,currentPassword));await updatePassword(user,newPassword);setCurrentPassword("");setNewPassword("");setConfirmPassword("");setMessage("Password berhasil diperbarui.");}catch(e){setError((e as {code?:string})?.code==="auth/wrong-password"?"Password saat ini tidak sesuai.":"Password belum dapat diperbarui. Silakan login ulang jika sesi kedaluwarsa.");}finally{setBusy(false);}}
+- return <AppShell role="user"><Head title="Profil dan pengaturan" subtitle="Informasi akun yang tersimpan di SISKA."/><div className="stack" style={{width:"100%"}}><form className="card stack" onSubmit={save}><h2 className="card-title" style={{marginBottom:0}}>Informasi akun</h2><label className="field"><span className="label">Nama tampilan</span><input required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></label><label className="field"><span className="label">Email</span><input value={email} readOnly/></label><label className="field"><span className="label">Peran</span><input value={role==="admin"?"Petugas":role==="reporter"?"Pengguna":role} readOnly/></label><button className="btn btn-primary" disabled={busy}>{busy?"Menyimpan…":"Simpan perubahan"}</button></form><form className="card stack" onSubmit={changePassword}><h2 className="card-title" style={{marginBottom:0}}>Ubah password</h2><label className="field"><span className="label">Password saat ini</span><input type="password" autoComplete="current-password" required value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)}/></label><label className="field"><span className="label">Password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={newPassword} onChange={e=>setNewPassword(e.target.value)}/></label><label className="field"><span className="label">Konfirmasi password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)}/></label><button className="btn btn-outline" disabled={busy}>Ubah password</button></form>{error&&<Alert>{error}</Alert>}{message&&<p role="status" className="status-msg">{message}</p>}</div></AppShell>;
++ return <AppShell role="user"><Head title="Profil dan pengaturan" subtitle="Informasi akun yang tersimpan di SISKA."/><div className="stack" style={{width:"100%"}}><form className="card stack" onSubmit={save}><h2 className="card-title" style={{marginBottom:0}}>Informasi akun</h2><div className="row" style={{gap:16,alignItems:"center"}}><img src={photoUrl||withBasePath("/default_photo.png")} alt="Foto profil" style={{width:64,height:64,borderRadius:"50%",objectFit:"cover",border:"1px solid var(--line)"}}/><label className="field" style={{flex:1}}><span className="label">Foto profil <em className="opt">JPG/PNG, maks. 5 MiB</em></span><input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={e=>setAvatarFile(e.target.files?.[0]??null)}/></label></div><label className="field"><span className="label">Nama tampilan</span><input required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></label><label className="field"><span className="label">Email</span><input value={email} readOnly/></label><label className="field"><span className="label">Peran</span><input value={role==="admin"?"Petugas":role==="reporter"?"Pengguna":role} readOnly/></label><button className="btn btn-primary" disabled={busy}>{busy?"Menyimpan…":"Simpan perubahan"}</button></form><form className="card stack" onSubmit={changePassword}><h2 className="card-title" style={{marginBottom:0}}>Ubah password</h2><label className="field"><span className="label">Password saat ini</span><input type="password" autoComplete="current-password" required value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)}/></label><label className="field"><span className="label">Password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={newPassword} onChange={e=>setNewPassword(e.target.value)}/></label><label className="field"><span className="label">Konfirmasi password baru</span><input type="password" autoComplete="new-password" required minLength={6} value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)}/></label><button className="btn btn-outline" disabled={busy}>Ubah password</button></form>{error&&<Alert>{error}</Alert>}{message&&<p role="status" className="status-msg">{message}</p>}</div></AppShell>;
+ }
+diff --git a/src/components/shell.tsx b/src/components/shell.tsx
+index 86052ff..69c6336 100644
+--- a/src/components/shell.tsx
++++ b/src/components/shell.tsx
+@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
+ import { useEffect, useRef, useState } from "react";
+ import { signOut } from "firebase/auth";
+ import {
+-  Bot, ChevronDown, Copy, FilePlus2, Headset, LayoutGrid, LogOut, Menu, FileText,
++  BookOpen, Bot, ChevronDown, Copy, FilePlus2, Headset, LayoutGrid, LogOut, Menu, FileText,
+   MessagesSquare, SlidersHorizontal, UserRound,
+ } from "lucide-react";
+ import { Logo } from "@/components/logo";
+@@ -23,6 +23,7 @@ const NAV = {
+     { href: "/user/reports", label: "Riwayat laporan", icon: Copy },
+     { href: "/user/chat", label: "Chat dengan Admin", icon: Headset },
+     { href: "/user/ai", label: "SISKA AI", icon: Bot },
++    { href: "/education", label: "Edukasi", icon: BookOpen },
+     { href: "/user/profile", label: "Profil dan pengaturan", icon: SlidersHorizontal },
+   ],
+   admin: [
+diff --git a/src/lib/api-client.ts b/src/lib/api-client.ts
+index a9ec3e3..a8f03e6 100644
+--- a/src/lib/api-client.ts
++++ b/src/lib/api-client.ts
+@@ -208,6 +208,28 @@ export async function updateMyProfileName(
+   });
+ }
+ 
++/**
++ * Memperbarui nama tampilan beserta foto profil opsional (`multipart/form-data`).
++ * Tanpa berkas, jatuh kembali ke pembaruan nama via JSON.
++ */
++export async function updateMyProfileWithAvatar(params: {
++  displayName: string;
++  avatarFile?: File | null;
++}): Promise<SerializedUserProfile> {
++  if (!params.avatarFile) {
++    return updateMyProfileName(params.displayName);
++  }
++
++  const formData = new FormData();
++  formData.append('displayName', params.displayName);
++  formData.append('avatar', params.avatarFile);
++
++  return apiRequest<SerializedUserProfile>('/profile', {
++    method: 'PATCH',
++    formData,
++  });
++}
++
+ /**
+  * Inisialisasi satu kali profil `reporter` pada saat registrasi akun baru,
+  * diikuti penyegaran ID token agar Custom Claim `{ role: 'reporter' }` langsung aktif.
+@@ -412,7 +434,21 @@ export async function fetchConversationMessages(
+ export async function postConversationMessage(
+   conversationId: string,
+   body: string,
++  attachmentFile?: File | null,
+ ): Promise<SerializedMessage> {
++  if (attachmentFile) {
++    const formData = new FormData();
++    formData.append('body', body);
++    formData.append('file', attachmentFile);
++    return apiRequest<SerializedMessage>(
++      `/conversations/${encodeURIComponent(conversationId)}/messages`,
++      {
++        method: 'POST',
++        formData,
++      },
++    );
++  }
++
+   return apiRequest<SerializedMessage>(
+     `/conversations/${encodeURIComponent(conversationId)}/messages`,
+     {
+@@ -422,6 +458,17 @@ export async function postConversationMessage(
+   );
+ }
+ 
++/** Meminta Signed URL pendek untuk melihat/mengunduh lampiran pesan. */
++export async function fetchMessageAttachmentSignedUrl(
++  conversationId: string,
++  messageId: string,
++): Promise<SignedDownloadUrlResult> {
++  return apiRequest<SignedDownloadUrlResult>(
++    `/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/attachment`,
++    { method: 'GET' },
++  );
++}
++
+ // ── 5. SISKA AI Chat API (/api/v1/ai/chat) ─────────────────────────────────
+ 
+ export async function askSiskaAiQuestion(
+@@ -739,6 +786,7 @@ export const siskaApi = {
+   profile: {
+     get: fetchMyProfile,
+     updateName: updateMyProfileName,
++    updateWithAvatar: updateMyProfileWithAvatar,
+     provisionReporter: provisionInitialReporterProfile,
+   },
+   reports: {
+@@ -760,6 +808,7 @@ export const siskaApi = {
+     updateByAdmin: updateConversationStatusByAdmin,
+     listMessages: fetchConversationMessages,
+     sendMessage: postConversationMessage,
++    getAttachmentSignedUrl: fetchMessageAttachmentSignedUrl,
+   },
+   education: {
+     list: fetchEducationList,
+diff --git a/src/lib/cloudinary/index.ts b/src/lib/cloudinary/index.ts
+new file mode 100644
+index 0000000..882120b
+--- /dev/null
++++ b/src/lib/cloudinary/index.ts
+@@ -0,0 +1,502 @@
++// Adapter Penyimpanan Cloudinary
++
++import { createHash } from 'node:crypto';
++import { isFirebaseEmulatorMode } from '@/lib/firebase/admin';
++import { ApiError } from '@/server/errors/api-error';
++import {
++  EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
++  type EvidenceContentType,
++} from '@/types/domain';
++
++if (typeof window !== 'undefined') {
++  throw new Error(
++    '[SISKA Security Violation] src/lib/cloudinary/index.ts tidak boleh diimpor di sisi browser/client.',
++  );
++}
++
++export type StorageProviderMode = 'cloudinary' | 'firebase';
++export type CloudinaryResourceType = 'image' | 'raw';
++export type CloudinaryDeliveryType = 'private' | 'authenticated' | 'upload';
++
++export interface CloudinaryConfig {
++  enabled: boolean;
++  cloudName: string;
++  apiKey: string;
++  apiSecret: string;
++  uploadFolder: string;
++}
++
++// Konfigurasi Cloudinary
++export function resolveCloudinaryConfig(): CloudinaryConfig {
++  const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim() || '';
++  const apiKey = process.env.CLOUDINARY_API_KEY?.trim() || '';
++  const apiSecret = process.env.CLOUDINARY_API_SECRET?.trim() || '';
++  const uploadFolder =
++    process.env.CLOUDINARY_UPLOAD_FOLDER?.trim().replace(/^\/+|\/+$/g, '') ||
++    'siska';
++
++  const enabled = Boolean(cloudName && apiKey && apiSecret);
++
++  return {
++    enabled,
++    cloudName,
++    apiKey,
++    apiSecret,
++    uploadFolder,
++  };
++}
++
++// Resolusi Storage Provider
++export function resolveActiveStorageProvider(): StorageProviderMode {
++  const explicitProvider = process.env.STORAGE_PROVIDER?.trim().toLowerCase();
++  const cloudinaryCfg = resolveCloudinaryConfig();
++
++  if (explicitProvider === 'cloudinary') {
++    if (!cloudinaryCfg.enabled) {
++      throw ApiError.internal(
++        'STORAGE_PROVIDER=cloudinary tetapi CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, atau CLOUDINARY_API_SECRET belum lengkap.',
++        'Layanan penyimpanan media belum terkonfigurasi dengan lengkap.',
++      );
++    }
++    return 'cloudinary';
++  }
++
++  if (explicitProvider === 'firebase') {
++    return 'firebase';
++  }
++
++  if (cloudinaryCfg.enabled && !isFirebaseEmulatorMode()) {
++    return 'cloudinary';
++  }
++
++  return 'firebase';
++}
++
++// Pemetaan Tipe Resource
++export function cloudinaryResourceTypeForMime(
++  contentType: EvidenceContentType | string,
++): CloudinaryResourceType {
++  if (contentType === 'application/pdf') {
++    return 'raw';
++  }
++  return 'image';
++}
++
++// Normalisasi Public ID
++export function toCloudinaryPublicId(
++  storagePath: string,
++  contentType?: string,
++  folderPrefix?: string,
++): {
++  publicId: string;
++  format: string;
++  resourceType: CloudinaryResourceType;
++} {
++  const cleanPath = storagePath.replace(/^\/+/, '');
++  const prefix = (
++    folderPrefix ?? resolveCloudinaryConfig().uploadFolder
++  ).replace(/^\/+|\/+$/g, '');
++
++  const dotIndex = cleanPath.lastIndexOf('.');
++  const hasExt = dotIndex > 0 && dotIndex > cleanPath.lastIndexOf('/');
++  const ext = hasExt ? cleanPath.slice(dotIndex + 1).toLowerCase() : '';
++  const pathWithoutExt = hasExt ? cleanPath.slice(0, dotIndex) : cleanPath;
++
++  const inferredMime =
++    contentType ||
++    (ext === 'pdf'
++      ? 'application/pdf'
++      : ext === 'png'
++        ? 'image/png'
++        : 'image/jpeg');
++  const resourceType = cloudinaryResourceTypeForMime(inferredMime);
++
++  const baseId = prefix ? `${prefix}/${pathWithoutExt}` : pathWithoutExt;
++  const publicId =
++    resourceType === 'raw' && ext ? `${baseId}.${ext}` : baseId;
++
++  return {
++    publicId,
++    format: ext || (resourceType === 'raw' ? 'pdf' : 'jpg'),
++    resourceType,
++  };
++}
++
++// Signature Parameter API
++export function signCloudinaryParams(
++  params: Record<string, string | number | boolean | undefined | null>,
++  apiSecret: string,
++): string {
++  const serialized = Object.keys(params)
++    .sort()
++    .filter((key) => {
++      const val = params[key];
++      return val !== undefined && val !== null && String(val).length > 0;
++    })
++    .map((key) => `${key}=${params[key]}`)
++    .join('&');
++
++  return createHash('sha1')
++    .update(`${serialized}${apiSecret}`, 'utf8')
++    .digest('hex');
++}
++
++// Signature Delivery URL
++export function signCloudinaryDeliveryPath(
++  pathToSign: string,
++  apiSecret: string,
++): string {
++  const digest = createHash('sha1')
++    .update(`${pathToSign}${apiSecret}`, 'utf8')
++    .digest('base64')
++    .replace(/\+/g, '-')
++    .replace(/\//g, '_')
++    .slice(0, 8);
++  return `s--${digest}--`;
++}
++
++export interface CloudinarySignedDownloadResult {
++  url: string;
++  expiresInSeconds: number;
++  previewUrl: string | null;
++  blurredPreviewUrl: string | null;
++}
++
++// Pembuatan Signed Download URL
++export function buildCloudinarySignedDownloadUrl(params: {
++  storagePath: string;
++  contentType?: string;
++  expiresInSeconds?: number;
++  deliveryType?: CloudinaryDeliveryType;
++}): CloudinarySignedDownloadResult {
++  const cfg = resolveCloudinaryConfig();
++  if (!cfg.enabled) {
++    throw ApiError.internal(
++      'Cloudinary belum dikonfigurasi saat membangun Signed Download URL.',
++    );
++  }
++
++  const boundedTtl = Math.min(
++    EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
++    Math.max(60, params.expiresInSeconds ?? EVIDENCE_SIGNED_URL_EXPIRES_SECONDS),
++  );
++  const nowSeconds = Math.floor(Date.now() / 1000);
++  const expiresAt = nowSeconds + boundedTtl;
++  const deliveryType: CloudinaryDeliveryType = params.deliveryType ?? 'private';
++
++  const { publicId, format, resourceType } = toCloudinaryPublicId(
++    params.storagePath,
++    params.contentType,
++    cfg.uploadFolder,
++  );
++
++  const signPayload: Record<string, string | number | boolean> = {
++    attachment: 'true',
++    expires_at: expiresAt,
++    public_id: publicId,
++    timestamp: nowSeconds,
++    type: deliveryType,
++    ...(resourceType === 'image' && format ? { format } : {}),
++  };
++
++  const signature = signCloudinaryParams(signPayload, cfg.apiSecret);
++  const query = new URLSearchParams({
++    api_key: cfg.apiKey,
++    attachment: 'true',
++    expires_at: String(expiresAt),
++    public_id: publicId,
++    signature,
++    timestamp: String(nowSeconds),
++    type: deliveryType,
++    ...(resourceType === 'image' && format ? { format } : {}),
++  });
++
++  const downloadUrl = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cfg.cloudName)}/${resourceType}/download?${query.toString()}`;
++
++  let previewUrl: string | null = null;
++  let blurredPreviewUrl: string | null = null;
++
++  if (resourceType === 'image') {
++    const cleanTransform = 'fl_strip_profile,f_auto,q_auto';
++    const cleanPath = `${cleanTransform}/${publicId}.${format}`;
++    const cleanSig = signCloudinaryDeliveryPath(cleanPath, cfg.apiSecret);
++    previewUrl = `https://res.cloudinary.com/${encodeURIComponent(cfg.cloudName)}/image/${deliveryType}/${cleanSig}/${cleanPath}`;
++
++    const blurTransform = 'e_blur:1200,fl_strip_profile,f_auto,q_auto,w_640';
++    const blurPath = `${blurTransform}/${publicId}.${format}`;
++    const blurSig = signCloudinaryDeliveryPath(blurPath, cfg.apiSecret);
++    blurredPreviewUrl = `https://res.cloudinary.com/${encodeURIComponent(cfg.cloudName)}/image/${deliveryType}/${blurSig}/${blurPath}`;
++  }
++
++  return {
++    url: downloadUrl,
++    expiresInSeconds: boundedTtl,
++    previewUrl,
++    blurredPreviewUrl,
++  };
++}
++
++// URL Gambar Publik Teroptimasi
++export function buildCloudinaryPublicImageUrl(params: {
++  storagePath: string;
++  preset: 'avatar' | 'education_cover';
++}): string {
++  const cfg = resolveCloudinaryConfig();
++  if (!cfg.enabled) {
++    return params.storagePath;
++  }
++
++  const { publicId, format } = toCloudinaryPublicId(
++    params.storagePath,
++    'image/jpeg',
++    cfg.uploadFolder,
++  );
++
++  const transform =
++    params.preset === 'avatar'
++      ? 'c_fill,g_auto,w_256,h_256,fl_strip_profile,f_auto,q_auto'
++      : 'c_limit,w_1200,fl_strip_profile,f_auto,q_auto';
++
++  return `https://res.cloudinary.com/${encodeURIComponent(cfg.cloudName)}/image/upload/${transform}/${publicId}.${format}`;
++}
++
++// Inisiasi Signed Upload
++export function buildCloudinarySignedUploadGrant(params: {
++  storagePath: string;
++  contentType: EvidenceContentType;
++  deliveryType?: CloudinaryDeliveryType;
++}): {
++  uploadUrl: string;
++  expiresInSeconds: number;
++  uploadParams: Record<string, string>;
++} {
++  const cfg = resolveCloudinaryConfig();
++  if (!cfg.enabled) {
++    throw ApiError.internal(
++      'Cloudinary belum dikonfigurasi saat menginisiasi Signed Upload.',
++    );
++  }
++
++  const deliveryType: CloudinaryDeliveryType = params.deliveryType ?? 'private';
++  const { publicId, resourceType } = toCloudinaryPublicId(
++    params.storagePath,
++    params.contentType,
++    cfg.uploadFolder,
++  );
++  const timestamp = Math.floor(Date.now() / 1000);
++
++  const toSign: Record<string, string | number> = {
++    overwrite: 'false',
++    public_id: publicId,
++    timestamp,
++    type: deliveryType,
++  };
++
++  const signature = signCloudinaryParams(toSign, cfg.apiSecret);
++  const query = new URLSearchParams({
++    api_key: cfg.apiKey,
++    overwrite: 'false',
++    public_id: publicId,
++    signature,
++    timestamp: String(timestamp),
++    type: deliveryType,
++  });
++
++  return {
++    uploadUrl: `https://api.cloudinary.com/v1_1/${encodeURIComponent(cfg.cloudName)}/${resourceType}/upload?${query.toString()}`,
++    expiresInSeconds: EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
++    uploadParams: {
++      api_key: cfg.apiKey,
++      overwrite: 'false',
++      public_id: publicId,
++      signature,
++      timestamp: String(timestamp),
++      type: deliveryType,
++    },
++  };
++}
++
++export interface CloudinaryUploadResponse {
++  publicId: string;
++  resourceType: CloudinaryResourceType;
++  deliveryType: CloudinaryDeliveryType;
++  bytes: number;
++  format: string;
++  secureUrl: string;
++}
++
++// Unggah Biner ke Cloudinary
++export async function uploadBytesToCloudinary(params: {
++  storagePath: string;
++  bytes: Uint8Array;
++  contentType: string;
++  fileName?: string;
++  deliveryType?: CloudinaryDeliveryType;
++}): Promise<CloudinaryUploadResponse> {
++  const cfg = resolveCloudinaryConfig();
++  if (!cfg.enabled) {
++    throw ApiError.internal(
++      'Kredensial Cloudinary belum diatur pada environment server.',
++    );
++  }
++
++  const deliveryType: CloudinaryDeliveryType = params.deliveryType ?? 'private';
++  const { publicId, format, resourceType } = toCloudinaryPublicId(
++    params.storagePath,
++    params.contentType,
++    cfg.uploadFolder,
++  );
++  const timestamp = Math.floor(Date.now() / 1000);
++
++  const signParams: Record<string, string | number> = {
++    overwrite: 'false',
++    public_id: publicId,
++    timestamp,
++    type: deliveryType,
++  };
++
++  const signature = signCloudinaryParams(signParams, cfg.apiSecret);
++
++  const formData = new FormData();
++  const blob = new Blob([Buffer.from(params.bytes)], {
++    type: params.contentType,
++  });
++  formData.append('file', blob, params.fileName || `asset.${format}`);
++  formData.append('api_key', cfg.apiKey);
++  formData.append('timestamp', String(timestamp));
++  formData.append('public_id', publicId);
++  formData.append('type', deliveryType);
++  formData.append('overwrite', 'false');
++  formData.append('signature', signature);
++
++  const endpoint = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cfg.cloudName)}/${resourceType}/upload`;
++
++  let response: Response;
++  try {
++    response = await fetch(endpoint, {
++      method: 'POST',
++      body: formData,
++      signal: AbortSignal.timeout(30_000),
++    });
++  } catch (err) {
++    throw ApiError.internal(
++      err instanceof Error ? err.message : 'Cloudinary upload network error',
++      'Gagal menghubungi layanan penyimpanan media Cloudinary.',
++    );
++  }
++
++  let payload: Record<string, unknown> = {};
++  try {
++    payload = (await response.json()) as Record<string, unknown>;
++  } catch {
++    payload = {};
++  }
++
++  if (!response.ok) {
++    const errObj = payload.error as { message?: string } | undefined;
++    const reason =
++      errObj?.message || `Cloudinary upload HTTP ${response.status}`;
++    if (response.status === 400 || response.status === 422) {
++      throw ApiError.uploadRejected(
++        'Berkas ditolak oleh pemindai format media. Pastikan berkas tidak rusak.',
++        400,
++      );
++    }
++    throw ApiError.internal(
++      reason,
++      'Gagal mengunggah berkas ke layanan penyimpanan media.',
++    );
++  }
++
++  return {
++    publicId: String(payload.public_id ?? publicId),
++    resourceType,
++    deliveryType,
++    bytes: Number(payload.bytes ?? params.bytes.byteLength),
++    format: String(payload.format ?? format),
++    secureUrl: String(payload.secure_url ?? ''),
++  };
++}
++
++// Unduh Biner dari Cloudinary
++export async function downloadBytesFromCloudinary(params: {
++  storagePath: string;
++  contentType: string;
++  deliveryType?: CloudinaryDeliveryType;
++}): Promise<Uint8Array | null> {
++  const signed = buildCloudinarySignedDownloadUrl({
++    storagePath: params.storagePath,
++    contentType: params.contentType,
++    expiresInSeconds: 60,
++    deliveryType: params.deliveryType ?? 'private',
++  });
++
++  try {
++    const response = await fetch(signed.url, {
++      method: 'GET',
++      signal: AbortSignal.timeout(20_000),
++    });
++    if (response.status === 404) {
++      return null;
++    }
++    if (!response.ok) {
++      throw new Error(`Cloudinary download returned HTTP ${response.status}`);
++    }
++    const arrayBuffer = await response.arrayBuffer();
++    return new Uint8Array(arrayBuffer);
++  } catch (err) {
++    if (err instanceof Error && err.message.includes('404')) {
++      return null;
++    }
++    throw err;
++  }
++}
++
++// Hapus Aset Cloudinary
++export async function deleteFromCloudinary(params: {
++  storagePath: string;
++  contentType?: string;
++  deliveryType?: CloudinaryDeliveryType;
++}): Promise<boolean> {
++  const cfg = resolveCloudinaryConfig();
++  if (!cfg.enabled) {
++    return false;
++  }
++
++  const deliveryType: CloudinaryDeliveryType = params.deliveryType ?? 'private';
++  const { publicId, resourceType } = toCloudinaryPublicId(
++    params.storagePath,
++    params.contentType,
++    cfg.uploadFolder,
++  );
++  const timestamp = Math.floor(Date.now() / 1000);
++
++  const signParams: Record<string, string | number> = {
++    invalidate: 'true',
++    public_id: publicId,
++    timestamp,
++    type: deliveryType,
++  };
++  const signature = signCloudinaryParams(signParams, cfg.apiSecret);
++
++  const formData = new FormData();
++  formData.append('api_key', cfg.apiKey);
++  formData.append('invalidate', 'true');
++  formData.append('public_id', publicId);
++  formData.append('timestamp', String(timestamp));
++  formData.append('type', deliveryType);
++  formData.append('signature', signature);
++
++  const endpoint = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cfg.cloudName)}/${resourceType}/destroy`;
++
++  try {
++    const response = await fetch(endpoint, {
++      method: 'POST',
++      body: formData,
++      signal: AbortSignal.timeout(15_000),
++    });
++    return response.ok;
++  } catch {
++    return false;
++  }
++}
+diff --git a/src/lib/firebase/storage.ts b/src/lib/firebase/storage.ts
+index 7c7c756..6e89625 100644
+--- a/src/lib/firebase/storage.ts
++++ b/src/lib/firebase/storage.ts
+@@ -1,4 +1,9 @@
+-import { getAdminStorage } from '@/lib/firebase/admin';
++import { getAdminStorage, isFirebaseEmulatorMode, resolveAdminConfig } from '@/lib/firebase/admin';
++import {
++  buildCloudinarySignedDownloadUrl,
++  downloadBytesFromCloudinary,
++  resolveActiveStorageProvider,
++} from '@/lib/cloudinary';
+ import { EVIDENCE_SIGNED_URL_EXPIRES_SECONDS } from '@/types/domain';
+ 
+ // Path Objek Bukti
+@@ -18,6 +23,13 @@ export function buildKnowledgeObjectPath(documentId: string): string {
+ 
+ // Verifikasi Keberadaan Objek Storage
+ export async function storageObjectExists(objectPath: string): Promise<boolean> {
++  if (resolveActiveStorageProvider() === 'cloudinary') {
++    const bytes = await downloadBytesFromCloudinary({
++      storagePath: objectPath,
++      contentType: objectPath.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
++    });
++    return bytes !== null && bytes.byteLength > 0;
++  }
+   const bucket = getAdminStorage().bucket();
+   const [exists] = await bucket.file(objectPath).exists();
+   return Boolean(exists);
+@@ -32,11 +44,34 @@ export async function createSignedEvidenceDownloadUrl(
+     EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
+     Math.max(60, expiresInSeconds),
+   );
++
++  if (resolveActiveStorageProvider() === 'cloudinary') {
++    const signed = buildCloudinarySignedDownloadUrl({
++      storagePath: objectPath,
++      expiresInSeconds: boundedTtl,
++    });
++    return {
++      signedUrl: signed.url,
++      expiresInSeconds: signed.expiresInSeconds,
++    };
++  }
++
++  if (isFirebaseEmulatorMode()) {
++    const cfg = resolveAdminConfig();
++    const host = cfg.storageHost || '127.0.0.1:9199';
++    const encodedPath = encodeURIComponent(objectPath);
++    return {
++      signedUrl: `http://${host}/v0/b/${cfg.storageBucket}/o/${encodedPath}?alt=media`,
++      expiresInSeconds: boundedTtl,
++    };
++  }
++
+   const bucket = getAdminStorage().bucket();
+   const [signedUrl] = await bucket.file(objectPath).getSignedUrl({
+     version: 'v4',
+     action: 'read',
+     expires: Date.now() + boundedTtl * 1000,
++    responseDisposition: 'attachment',
+   });
+ 
+   return {
+diff --git a/src/server/contracts/backend-api.manifest.ts b/src/server/contracts/backend-api.manifest.ts
+index 57a7b8c..5096cb5 100644
+--- a/src/server/contracts/backend-api.manifest.ts
++++ b/src/server/contracts/backend-api.manifest.ts
+@@ -184,9 +184,18 @@ export const BACKEND_API_MANIFEST: readonly BackendEndpointDescriptor[] = [
+     method: 'POST',
+     path: '/api/v1/conversations/{id}/messages',
+     allowedRoles: ['reporter', 'admin'],
+-    ownershipRule: '`senderUid` & `senderRole` diambil dari token server (CHAT-01)',
++    ownershipRule: '`senderUid` & `senderRole` diambil dari token server (CHAT-01); mendukung lampiran foto/PDF privat',
+     rateLimitPolicy: 'SEND_MESSAGE',
+-    description: 'Mengirim pesan baru pada percakapan yang masih berstatus `open`.',
++    description: 'Mengirim pesan baru (beserta lampiran foto/PDF opsional) pada percakapan yang masih berstatus `open`.',
++  },
++  {
++    id: 'messages.attachmentDownload',
++    method: 'GET',
++    path: '/api/v1/conversations/{id}/messages/{messageId}/attachment',
++    allowedRoles: ['reporter', 'admin'],
++    ownershipRule: 'Hanya peserta percakapan sah; menerbitkan Signed URL pendek (<= 300 detik) & pratinjau EXIF-stripped',
++    rateLimitPolicy: null,
++    description: 'Mengotorisasi pengunduhan/pratinjau lampiran foto atau berkas pada pesan percakapan.',
+   },
+ 
+   // 6. SISKA AI General Assistant
+diff --git a/src/server/services/conversation.service.ts b/src/server/services/conversation.service.ts
+index 975b3e4..94cc6d7 100644
+--- a/src/server/services/conversation.service.ts
++++ b/src/server/services/conversation.service.ts
+@@ -9,9 +9,21 @@
+  */
+ 
+ import type { DocumentData } from 'firebase-admin/firestore';
+-import { getAdminDb } from '@/lib/firebase/admin';
++import {
++  buildCloudinarySignedDownloadUrl,
++  deleteFromCloudinary,
++  resolveActiveStorageProvider,
++  uploadBytesToCloudinary,
++} from '@/lib/cloudinary';
++import {
++  getAdminBucket,
++  getAdminDb,
++  isFirebaseEmulatorMode,
++  resolveAdminConfig,
++} from '@/lib/firebase/admin';
+ import { toIsoDateString, toIsoStringOrNull } from '@/lib/firebase/firestore';
+ import {
++  INDISTINGUISHABLE_NOT_FOUND_MESSAGE,
+   assertCanAccessConversation,
+   assertCanReadReport,
+   requireAdmin,
+@@ -21,24 +33,30 @@ import {
+ } from '@/server/authz/permissions';
+ import type { AuthenticatedCaller } from '@/server/authz/verify-token';
+ import { ApiError } from '@/server/errors/api-error';
+-import { recordAuditEventInTransaction } from '@/server/services/audit.service';
++import {
++  recordAuditEvent,
++  recordAuditEventInTransaction,
++} from '@/server/services/audit.service';
+ import type { PaginationParams } from '@/server/validators/common';
+ import type {
+   CreateConversationInput,
+   SendMessageInput,
+   UpdateConversationAdminInput,
+ } from '@/server/validators/conversation.validator';
++import { extensionForEvidenceType } from '@/server/validators/evidence.validator';
+ import type {
+   PaginatedConversationsResult,
+   PaginatedMessagesResult,
+   SerializedConversation,
+   SerializedMessage,
++  SignedDownloadUrlResult,
+ } from '@/types/api';
+-import type {
+-  ConversationDocument,
+-  ConversationStatus,
+-  MessageDocument,
+-  ReportDocument,
++import {
++  EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
++  type ConversationDocument,
++  type ConversationStatus,
++  type MessageDocument,
++  type ReportDocument,
+ } from '@/types/domain';
+ 
+ export type {
+@@ -347,88 +365,248 @@ export async function sendMessage(
+   const authorized = requireRole(caller, ['reporter', 'admin']);
+   const db = getAdminDb();
+   const convRef = db.collection('conversations').doc(conversationId);
+-
+-  const createdMessage = await db.runTransaction(async (tx) => {
+-    const convSnap = await tx.get(convRef);
+-    const convData = convSnap.exists
+-      ? (convSnap.data() as ConversationDocument)
++  const preGeneratedMsgRef = convRef.collection('messages').doc();
++  const provider = resolveActiveStorageProvider();
++
++  let uploadedAttachmentPath: string | null = null;
++  let uploadedContentType: string | undefined;
++
++  // Lampiran diunggah SEBELUM transaksi Firestore. Otorisasi (termasuk klaim admin
++  // pada percakapan yang belum ditugaskan) diperiksa lebih dulu agar pengguna tak
++  // berwenang tidak pernah dapat menulis berkas ke storage.
++  if (input.attachment) {
++    const preSnap = await convRef.get();
++    const preData = preSnap.exists
++      ? (preSnap.data() as ConversationDocument)
+       : null;
+-
+-    const assignedAdminId = convData ? resolveConversationAdminId(convData) : null;
+-    const unassignedAdminUsers = authorized.role === 'reporter' && !assignedAdminId
+-      ? await tx.get(db.collection('users').where('role', '==', 'admin'))
++    const preAssignedAdmin = preData
++      ? resolveConversationAdminId(preData)
+       : null;
++    const effectivePreData: ConversationDocument | null =
++      preData && authorized.role === 'admin' && !preAssignedAdmin
++        ? { ...preData, assignedAdminId: authorized.uid }
++        : preData;
+ 
+-    // Jika admin membalas percakapan yang belum ditugaskan (`assignedAdminId === null`),
+-    // klaim penugasan untuk admin tersebut; jika sudah ditugaskan ke admin lain atau tidak ada, assertCanAccessConversation akan menolak secara seragam (404).
+-    const effectiveConvData: ConversationDocument | null =
+-      convData && authorized.role === 'admin' && !assignedAdminId
+-        ? { ...convData, assignedAdminId: authorized.uid }
+-        : convData;
+-
+-    assertCanAccessConversation(authorized, effectiveConvData, 'send');
++    assertCanAccessConversation(authorized, effectivePreData, 'send');
+ 
+-    if (convData!.status === 'closed') {
++    if (preData!.status === 'closed') {
+       throw ApiError.conflict(
+         'Percakapan ini telah ditutup dan tidak dapat menerima pesan baru.',
+       );
+     }
+ 
+-    const now = new Date();
+-    const msgRef = convRef.collection('messages').doc();
+-    const msgData: MessageDocument = {
+-      senderUid: authorized.uid,
+-      body: input.body,
+-      createdAt: now,
+-      attachmentPath: null,
+-    };
++    const ext = extensionForEvidenceType(input.attachment.contentType);
++    uploadedAttachmentPath = `conversations/${conversationId}/attachments/${preGeneratedMsgRef.id}.${ext}`;
++    uploadedContentType = input.attachment.contentType;
++
++    if (provider === 'cloudinary') {
++      await uploadBytesToCloudinary({
++        storagePath: uploadedAttachmentPath,
++        bytes: input.attachment.bytes,
++        contentType: input.attachment.contentType,
++        fileName: input.attachment.fileName,
++        deliveryType: 'private',
++      });
++    } else {
++      const bucket = getAdminBucket();
++      await bucket.file(uploadedAttachmentPath).save(Buffer.from(input.attachment.bytes), {
++        resumable: false,
++        contentType: input.attachment.contentType,
++        metadata: {
++          cacheControl: 'private, no-store',
++        },
++      });
++    }
++  }
+ 
+-    tx.create(msgRef, msgData);
+-    tx.update(convRef, {
+-      updatedAt: now,
+-      // Metadata ringkas ini membuat preview daftar chat ikut realtime
+-      // melalui listener dokumen conversations tanpa listener tambahan per pesan.
+-      lastMessage: input.body.slice(0, 180),
+-      lastMessageSenderUid: authorized.uid,
+-      lastMessageAt: now,
+-      ...(authorized.role === 'admin' && !assignedAdminId
+-        ? { assignedAdminId: authorized.uid }
+-        : {}),
+-    });
++  let createdMessage: SerializedMessage;
++  try {
++    createdMessage = await db.runTransaction(async (tx) => {
++      const convSnap = await tx.get(convRef);
++      const convData = convSnap.exists
++        ? (convSnap.data() as ConversationDocument)
++        : null;
++
++      const assignedAdminId = convData ? resolveConversationAdminId(convData) : null;
++      const unassignedAdminUsers = authorized.role === 'reporter' && !assignedAdminId
++        ? await tx.get(db.collection('users').where('role', '==', 'admin'))
++        : null;
+ 
+-    // Otomatis kirim In-App Notification kepada lawan bicara di percakapan
+-    const reporterId = resolveConversationReporterId(convData!);
+-    const recipientUid =
+-      authorized.role === 'reporter' ? assignedAdminId : reporterId;
+-
+-    const notificationRecipients = recipientUid
+-      ? [recipientUid]
+-      : (unassignedAdminUsers?.docs ?? []).map((adminUser) => adminUser.id);
+-    for (const targetUid of notificationRecipients) {
+-      // ID deterministik: satu notifikasi per percakapan per penerima. Pesan berikutnya
+-      // memperbarui notifikasi yang sama (kembali "belum dibaca" + naik ke atas daftar)
+-      // sehingga lonceng tidak dibanjiri satu item per pesan.
+-      const notifRef = db.collection('users').doc(targetUid)
+-        .collection('notifications').doc(`chat_${conversationId}`);
+-      tx.set(notifRef, {
+-        recipientUid: targetUid,
+-        type: 'new_chat_message',
+-        title: 'Pesan Baru Diterima',
+-        body: 'Anda menerima pesan baru pada ruang percakapan SISKA.',
+-        targetType: 'conversation',
+-        targetId: conversationId,
+-        // Dipakai badge untuk menghitung jumlah pengguna, bukan jumlah pesan.
++      // Jika admin membalas percakapan yang belum ditugaskan (`assignedAdminId === null`),
++      // klaim penugasan untuk admin tersebut; jika sudah ditugaskan ke admin lain atau tidak ada, assertCanAccessConversation akan menolak secara seragam (404).
++      const effectiveConvData: ConversationDocument | null =
++        convData && authorized.role === 'admin' && !assignedAdminId
++          ? { ...convData, assignedAdminId: authorized.uid }
++          : convData;
++
++      assertCanAccessConversation(authorized, effectiveConvData, 'send');
++
++      if (convData!.status === 'closed') {
++        throw ApiError.conflict(
++          'Percakapan ini telah ditutup dan tidak dapat menerima pesan baru.',
++        );
++      }
++
++      const now = new Date();
++      const msgRef = preGeneratedMsgRef;
++      const msgData: MessageDocument = {
+         senderUid: authorized.uid,
+-        isRead: false,
+-        readAt: null,
++        body: input.body,
+         createdAt: now,
++        attachmentPath: uploadedAttachmentPath,
++      };
++
++      tx.create(msgRef, msgData);
++      tx.update(convRef, {
++        updatedAt: now,
++        // Metadata ringkas ini membuat preview daftar chat ikut realtime
++        // melalui listener dokumen conversations tanpa listener tambahan per pesan.
++        lastMessage: input.body.slice(0, 180),
++        lastMessageSenderUid: authorized.uid,
++        lastMessageAt: now,
++        ...(authorized.role === 'admin' && !assignedAdminId
++          ? { assignedAdminId: authorized.uid }
++          : {}),
+       });
++
++      // Otomatis kirim In-App Notification kepada lawan bicara di percakapan
++      const reporterId = resolveConversationReporterId(convData!);
++      const recipientUid =
++        authorized.role === 'reporter' ? assignedAdminId : reporterId;
++
++      const notificationRecipients = recipientUid
++        ? [recipientUid]
++        : (unassignedAdminUsers?.docs ?? []).map((adminUser) => adminUser.id);
++      for (const targetUid of notificationRecipients) {
++        // ID deterministik: satu notifikasi per percakapan per penerima. Pesan berikutnya
++        // memperbarui notifikasi yang sama (kembali "belum dibaca" + naik ke atas daftar)
++        // sehingga lonceng tidak dibanjiri satu item per pesan.
++        const notifRef = db.collection('users').doc(targetUid)
++          .collection('notifications').doc(`chat_${conversationId}`);
++        tx.set(notifRef, {
++          recipientUid: targetUid,
++          type: 'new_chat_message',
++          title: 'Pesan Baru Diterima',
++          body: 'Anda menerima pesan baru pada ruang percakapan SISKA.',
++          targetType: 'conversation',
++          targetId: conversationId,
++          // Dipakai badge untuk menghitung jumlah pengguna, bukan jumlah pesan.
++          senderUid: authorized.uid,
++          isRead: false,
++          readAt: null,
++          createdAt: now,
++        });
++      }
++
++      return serializeMessageDoc(msgRef.id, msgData);
++    });
++  } catch (txError) {
++    // Kompensasi: hapus lampiran yatim bila transaksi Firestore gagal.
++    if (uploadedAttachmentPath) {
++      if (provider === 'cloudinary') {
++        await deleteFromCloudinary({
++          storagePath: uploadedAttachmentPath,
++          contentType: uploadedContentType,
++          deliveryType: 'private',
++        }).catch(() => undefined);
++      } else {
++        await getAdminBucket()
++          .file(uploadedAttachmentPath)
++          .delete({ ignoreNotFound: true })
++          .catch(() => undefined);
++      }
+     }
++    throw txError;
++  }
+ 
+-    return serializeMessageDoc(msgRef.id, msgData);
++  return createdMessage;
++}
++
++/**
++ * Mengotorisasi pengunduhan/pratinjau lampiran pesan dan menerbitkan Signed URL singkat
++ * (`GET /api/v1/conversations/{conversationId}/messages/{messageId}/attachment`).
++ * Hanya peserta sah percakapan; selain itu 404 seragam (anti-IDOR).
++ */
++export async function authorizeMessageAttachmentDownload(
++  caller: AuthenticatedCaller,
++  conversationId: string,
++  messageId: string,
++  requestId: string,
++): Promise<SignedDownloadUrlResult> {
++  const db = getAdminDb();
++  const convRef = db.collection('conversations').doc(conversationId);
++  const convSnap = await convRef.get();
++  const convData = convSnap.exists
++    ? (convSnap.data() as ConversationDocument)
++    : null;
++
++  const authorized = assertCanAccessConversation(caller, convData, 'read');
++
++  const msgSnap = await convRef.collection('messages').doc(messageId).get();
++  if (!msgSnap.exists) {
++    throw ApiError.notFound(INDISTINGUISHABLE_NOT_FOUND_MESSAGE);
++  }
++
++  const msgData = msgSnap.data() as MessageDocument;
++  if (!msgData.attachmentPath) {
++    throw ApiError.notFound(INDISTINGUISHABLE_NOT_FOUND_MESSAGE);
++  }
++
++  const storagePath = msgData.attachmentPath;
++  const inferredMime = storagePath.endsWith('.pdf')
++    ? 'application/pdf'
++    : storagePath.endsWith('.png')
++      ? 'image/png'
++      : 'image/jpeg';
++
++  let signedResult: SignedDownloadUrlResult;
++  if (resolveActiveStorageProvider() === 'cloudinary') {
++    const cldSigned = buildCloudinarySignedDownloadUrl({
++      storagePath,
++      contentType: inferredMime,
++      expiresInSeconds: EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
++      deliveryType: 'private',
++    });
++    signedResult = {
++      url: cldSigned.url,
++      expiresInSeconds: cldSigned.expiresInSeconds,
++      ...(cldSigned.previewUrl ? { previewUrl: cldSigned.previewUrl } : {}),
++      ...(cldSigned.blurredPreviewUrl
++        ? { blurredPreviewUrl: cldSigned.blurredPreviewUrl }
++        : {}),
++    };
++  } else if (isFirebaseEmulatorMode()) {
++    const cfg = resolveAdminConfig();
++    const host = cfg.storageHost || '127.0.0.1:9199';
++    const encodedPath = encodeURIComponent(storagePath);
++    signedResult = {
++      url: `http://${host}/v0/b/${cfg.storageBucket}/o/${encodedPath}?alt=media`,
++      expiresInSeconds: EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
++    };
++  } else {
++    const [url] = await getAdminBucket()
++      .file(storagePath)
++      .getSignedUrl({
++        version: 'v4',
++        action: 'read',
++        expires: Date.now() + EVIDENCE_SIGNED_URL_EXPIRES_SECONDS * 1000,
++        responseDisposition: 'attachment',
++      });
++    signedResult = {
++      url,
++      expiresInSeconds: EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
++    };
++  }
++
++  await recordAuditEvent({
++    actorUid: authorized.uid,
++    action: 'evidence.downloaded',
++    targetType: 'conversation',
++    targetId: conversationId,
++    requestId,
+   });
+ 
+-  return createdMessage;
++  return signedResult;
+ }
+ 
+ /**
+diff --git a/src/server/services/education.service.ts b/src/server/services/education.service.ts
+index 19205c3..118ca0b 100644
+--- a/src/server/services/education.service.ts
++++ b/src/server/services/education.service.ts
+@@ -7,7 +7,18 @@
+  */
+ 
+ import type { DocumentData, Query } from 'firebase-admin/firestore';
+-import { getAdminDb } from '@/lib/firebase/admin';
++import {
++  buildCloudinaryPublicImageUrl,
++  deleteFromCloudinary,
++  resolveActiveStorageProvider,
++  uploadBytesToCloudinary,
++} from '@/lib/cloudinary';
++import {
++  getAdminBucket,
++  getAdminDb,
++  isFirebaseEmulatorMode,
++  resolveAdminConfig,
++} from '@/lib/firebase/admin';
+ import { toIsoDateString } from '@/lib/firebase/firestore';
+ import { requireAdmin } from '@/server/authz/permissions';
+ import type { AuthenticatedCaller } from '@/server/authz/verify-token';
+@@ -15,9 +26,11 @@ import { ApiError } from '@/server/errors/api-error';
+ import { recordAuditEvent } from '@/server/services/audit.service';
+ import type {
+   CreateEducationInput,
++  EducationCoverUploadInput,
+   ListEducationQuery,
+   UpdateEducationInput,
+ } from '@/server/validators/education.validator';
++import { extensionForEvidenceType } from '@/server/validators/evidence.validator';
+ import type {
+   PaginatedEducationResult,
+   SerializedEducationItem,
+@@ -37,6 +50,18 @@ function serializeEducationDoc(
+   id: string,
+   data: DocumentData,
+ ): SerializedEducationItem {
++  const coverImageUrl =
++    typeof data.coverImageUrl === 'string' && data.coverImageUrl.length > 0
++      ? data.coverImageUrl
++      : typeof data.coverStoragePath === 'string' &&
++          data.coverStoragePath.length > 0 &&
++          resolveActiveStorageProvider() === 'cloudinary'
++        ? buildCloudinaryPublicImageUrl({
++            storagePath: data.coverStoragePath,
++            preset: 'education_cover',
++          })
++        : undefined;
++
+   return {
+     id,
+     slug: typeof data.slug === 'string' ? data.slug : id,
+@@ -55,9 +80,52 @@ function serializeEducationDoc(
+     createdBy: typeof data.createdBy === 'string' ? data.createdBy : 'system',
+     createdAt: toIsoDateString(data.createdAt),
+     updatedAt: toIsoDateString(data.updatedAt),
++    ...(coverImageUrl !== undefined ? { coverImageUrl } : {}),
+   };
+ }
+ 
++// Penyimpanan Gambar Sampul Edukasi
++async function storeEducationCoverImage(
++  docId: string,
++  coverImage: EducationCoverUploadInput,
++): Promise<{ coverStoragePath: string; coverImageUrl: string }> {
++  const ext = extensionForEvidenceType(coverImage.contentType);
++  const coverStoragePath = `education/${docId}/cover_${Date.now()}.${ext}`;
++  const provider = resolveActiveStorageProvider();
++
++  if (provider === 'cloudinary') {
++    await uploadBytesToCloudinary({
++      storagePath: coverStoragePath,
++      bytes: coverImage.bytes,
++      contentType: coverImage.contentType,
++      fileName: coverImage.fileName,
++      deliveryType: 'upload',
++    });
++    return {
++      coverStoragePath,
++      coverImageUrl: buildCloudinaryPublicImageUrl({
++        storagePath: coverStoragePath,
++        preset: 'education_cover',
++      }),
++    };
++  }
++
++  const bucket = getAdminBucket();
++  await bucket.file(coverStoragePath).save(Buffer.from(coverImage.bytes), {
++    resumable: false,
++    contentType: coverImage.contentType,
++    metadata: {
++      cacheControl: 'public, max-age=86400',
++    },
++  });
++  const cfg = resolveAdminConfig();
++  const host = cfg.storageHost || '127.0.0.1:9199';
++  const coverImageUrl = isFirebaseEmulatorMode()
++    ? `http://${host}/v0/b/${cfg.storageBucket}/o/${encodeURIComponent(coverStoragePath)}?alt=media`
++    : `https://storage.googleapis.com/${cfg.storageBucket}/${coverStoragePath}`;
++  return { coverStoragePath, coverImageUrl };
++}
++
+ /**
+  * Mengambil daftar materi edukasi.
+  * - Bersifat publik (tanpa login).
+@@ -185,6 +253,12 @@ export async function createEducationMaterial(
+   const generatedSlug = input.slug?.trim() || slugify(input.title);
+   const docRef = db.collection('education').doc();
+ 
++  let uploadedCover: { coverStoragePath: string; coverImageUrl: string } | null =
++    null;
++  if (input.coverImage) {
++    uploadedCover = await storeEducationCoverImage(docRef.id, input.coverImage);
++  }
++
+   const docData: EducationDocument = {
+     title: input.title,
+     slug: generatedSlug,
+@@ -199,9 +273,34 @@ export async function createEducationMaterial(
+     createdBy: admin.uid,
+     createdAt: now,
+     updatedAt: now,
++    ...(uploadedCover
++      ? {
++          coverStoragePath: uploadedCover.coverStoragePath,
++          coverImageUrl: uploadedCover.coverImageUrl,
++        }
++      : {}),
+   };
+ 
+-  await docRef.set(docData);
++  try {
++    await docRef.set(docData);
++  } catch (err) {
++    // Kompensasi: hapus sampul yatim bila penulisan dokumen gagal.
++    if (uploadedCover && input.coverImage) {
++      if (resolveActiveStorageProvider() === 'cloudinary') {
++        await deleteFromCloudinary({
++          storagePath: uploadedCover.coverStoragePath,
++          contentType: input.coverImage.contentType,
++          deliveryType: 'upload',
++        }).catch(() => undefined);
++      } else {
++        await getAdminBucket()
++          .file(uploadedCover.coverStoragePath)
++          .delete({ ignoreNotFound: true })
++          .catch(() => undefined);
++      }
++    }
++    throw err;
++  }
+ 
+   await recordAuditEvent({
+     actorUid: admin.uid,
+@@ -254,6 +353,16 @@ export async function updateEducationMaterial(
+   }
+   if (input.isPublished !== undefined) updateData.isPublished = input.isPublished;
+   if (input.sortOrder !== undefined) updateData.sortOrder = input.sortOrder;
++  if (input.coverImage !== undefined) {
++    if (input.coverImage === null) {
++      updateData.coverImageUrl = null;
++      updateData.coverStoragePath = null;
++    } else {
++      const uploadedCover = await storeEducationCoverImage(id, input.coverImage);
++      updateData.coverStoragePath = uploadedCover.coverStoragePath;
++      updateData.coverImageUrl = uploadedCover.coverImageUrl;
++    }
++  }
+ 
+   await docRef.update(updateData);
+ 
+@@ -287,8 +396,27 @@ export async function deleteEducationMaterial(
+     throw ApiError.notFound('Materi edukasi tidak ditemukan.');
+   }
+ 
++  const existingData = snap.data() as EducationDocument;
+   await docRef.delete();
+ 
++  // Bersihkan gambar sampul (best-effort) agar tidak tertinggal yatim di storage.
++  if (existingData.coverStoragePath) {
++    if (resolveActiveStorageProvider() === 'cloudinary') {
++      await deleteFromCloudinary({
++        storagePath: existingData.coverStoragePath,
++        contentType: existingData.coverStoragePath.endsWith('.png')
++          ? 'image/png'
++          : 'image/jpeg',
++        deliveryType: 'upload',
++      }).catch(() => undefined);
++    } else {
++      await getAdminBucket()
++        .file(existingData.coverStoragePath)
++        .delete({ ignoreNotFound: true })
++        .catch(() => undefined);
++    }
++  }
++
+   await recordAuditEvent({
+     actorUid: admin.uid,
+     action: 'education.deleted',
+diff --git a/src/server/services/evidence.service.ts b/src/server/services/evidence.service.ts
+index e8cc6bc..69a84af 100644
+--- a/src/server/services/evidence.service.ts
++++ b/src/server/services/evidence.service.ts
+@@ -9,6 +9,14 @@
+  */
+ 
+ import { createHash } from 'node:crypto';
++import {
++  buildCloudinarySignedDownloadUrl,
++  buildCloudinarySignedUploadGrant,
++  deleteFromCloudinary,
++  downloadBytesFromCloudinary,
++  resolveActiveStorageProvider,
++  uploadBytesToCloudinary,
++} from '@/lib/cloudinary';
+ import {
+   getAdminBucket,
+   getAdminDb,
+@@ -40,6 +48,7 @@ import type {
+ import {
+   EVIDENCE_MAX_BYTES,
+   EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
++  type EvidenceContentType,
+   type EvidenceDocument,
+   type ReportDocument,
+ } from '@/types/domain';
+@@ -57,8 +66,39 @@ export type {
+ async function buildShortLivedStorageUrl(
+   storagePath: string,
+   action: 'read' | 'write',
+-  contentType?: string,
++  contentType?: EvidenceContentType,
+ ): Promise<SignedDownloadUrlResult> {
++  const provider = resolveActiveStorageProvider();
++
++  if (provider === 'cloudinary') {
++    if (action === 'write') {
++      const grant = buildCloudinarySignedUploadGrant({
++        storagePath,
++        contentType: contentType ?? 'image/jpeg',
++        deliveryType: 'private',
++      });
++      return {
++        url: grant.uploadUrl,
++        expiresInSeconds: grant.expiresInSeconds,
++      };
++    }
++
++    const signed = buildCloudinarySignedDownloadUrl({
++      storagePath,
++      contentType,
++      expiresInSeconds: EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
++      deliveryType: 'private',
++    });
++    return {
++      url: signed.url,
++      expiresInSeconds: signed.expiresInSeconds,
++      ...(signed.previewUrl ? { previewUrl: signed.previewUrl } : {}),
++      ...(signed.blurredPreviewUrl
++        ? { blurredPreviewUrl: signed.blurredPreviewUrl }
++        : {}),
++    };
++  }
++
+   const expiresInSeconds = EVIDENCE_SIGNED_URL_EXPIRES_SECONDS;
+   const expiresAtMs = Date.now() + expiresInSeconds * 1000;
+ 
+@@ -78,6 +118,7 @@ async function buildShortLivedStorageUrl(
+     action,
+     expires: expiresAtMs,
+     ...(action === 'write' && contentType ? { contentType } : {}),
++    ...(action === 'read' ? { responseDisposition: 'attachment' } : {}),
+   });
+ 
+   return { url, expiresInSeconds };
+@@ -130,21 +171,6 @@ async function persistVerifiedEvidenceBytes(params: {
+     throw ApiError.uploadRejected(msg, 400, { sha256: msg });
+   }
+ 
+-  const ext = extensionForEvidenceType(contentType);
+-  const storagePath = `reports/${reportId}/evidence/${evidenceId}.${ext}`;
+-  const now = new Date();
+-
+-  const bucket = getAdminBucket();
+-  const storageFile = bucket.file(storagePath);
+-
+-  await storageFile.save(Buffer.from(bytes), {
+-    resumable: false,
+-    contentType,
+-    metadata: {
+-      cacheControl: 'private, no-store',
+-    },
+-  });
+-
+   const db = getAdminDb();
+   const evidenceRef = db
+     .collection('reports')
+@@ -152,6 +178,40 @@ async function persistVerifiedEvidenceBytes(params: {
+     .collection('evidence')
+     .doc(evidenceId);
+ 
++  // Tolak ID bukti yang sudah tercatat sebelum menyentuh storage, agar unggahan
++  // ulang tidak menimpa berkas milik metadata yang sudah ada.
++  const existingSnap = await evidenceRef.get();
++  if (existingSnap.exists) {
++    throw ApiError.conflict(
++      'Metadata untuk ID bukti ini sudah tercatat sebelumnya.',
++    );
++  }
++
++  const ext = extensionForEvidenceType(contentType);
++  const storagePath = `reports/${reportId}/evidence/${evidenceId}.${ext}`;
++  const now = new Date();
++  const provider = resolveActiveStorageProvider();
++
++  if (provider === 'cloudinary') {
++    await uploadBytesToCloudinary({
++      storagePath,
++      bytes,
++      contentType,
++      fileName: originalName,
++      deliveryType: 'private',
++    });
++  } else {
++    const bucket = getAdminBucket();
++    const storageFile = bucket.file(storagePath);
++    await storageFile.save(Buffer.from(bytes), {
++      resumable: false,
++      contentType,
++      metadata: {
++        cacheControl: 'private, no-store',
++      },
++    });
++  }
++
+   const evidenceDoc: EvidenceDocument = {
+     storagePath,
+     originalName,
+@@ -176,7 +236,19 @@ async function persistVerifiedEvidenceBytes(params: {
+     await batch.commit();
+   } catch (dbError) {
+     // Kompensasi penghapusan file yatim jika penyimpanan metadata ke Firestore gagal (FILE-04 / NFR-REL-01)
+-    await storageFile.delete({ ignoreNotFound: true }).catch(() => undefined);
++    if (provider === 'cloudinary') {
++      await deleteFromCloudinary({
++        storagePath,
++        contentType,
++        deliveryType: 'private',
++      }).catch(() => undefined);
++    } else {
++      const bucket = getAdminBucket();
++      await bucket
++        .file(storagePath)
++        .delete({ ignoreNotFound: true })
++        .catch(() => undefined);
++    }
+     throw ApiError.internal(
+       dbError instanceof Error
+         ? dbError.message
+@@ -233,6 +305,13 @@ export async function registerEvidenceUpload(
+ 
+   // Mode 1: Payload biner dikirim sebagai base64 di dalam JSON
+   if (input.contentBase64) {
++    // Tolak payload base64 berlebih sebelum didekode agar tidak memboroskan memori.
++    const maxBase64Chars = Math.ceil((EVIDENCE_MAX_BYTES * 4) / 3) + 1024;
++    if (input.contentBase64.length > maxBase64Chars) {
++      const msg = `Ukuran berkas melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
++      throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
++    }
++
+     const rawBuffer = Buffer.from(input.contentBase64, 'base64');
+     if (rawBuffer.byteLength !== input.sizeBytes) {
+       const msg =
+@@ -265,27 +344,53 @@ export async function registerEvidenceUpload(
+ 
+     const ext = extensionForEvidenceType(input.contentType);
+     const storagePath = `reports/${reportId}/evidence/${input.evidenceId}.${ext}`;
+-    const bucket = getAdminBucket();
+-    const storageFile = bucket.file(storagePath);
++    const provider = resolveActiveStorageProvider();
++
++    let bytes: Uint8Array;
++
++    if (provider === 'cloudinary') {
++      let downloaded: Uint8Array | null;
++      try {
++        downloaded = await downloadBytesFromCloudinary({
++          storagePath,
++          contentType: input.contentType,
++          deliveryType: 'private',
++        });
++      } catch {
++        throw ApiError.uploadRejected(
++          'Gagal memverifikasi isi berkas di layanan penyimpanan media.',
++          400,
++        );
++      }
+ 
+-    const [exists] = await storageFile.exists();
+-    if (!exists) {
+-      const msg =
+-        'Berkas bukti belum ditemukan di Cloud Storage. Unggah berkas ke uploadUrl terlebih dahulu sebelum finalisasi.';
+-      throw ApiError.validation(msg, { evidenceId: msg });
+-    }
++      if (!downloaded) {
++        const msg =
++          'Berkas bukti belum ditemukan di penyimpanan media. Unggah berkas ke uploadUrl terlebih dahulu sebelum finalisasi.';
++        throw ApiError.validation(msg, { evidenceId: msg });
++      }
++      bytes = downloaded;
++    } else {
++      const bucket = getAdminBucket();
++      const storageFile = bucket.file(storagePath);
+ 
+-    let downloadedBuffer: Buffer;
+-    try {
+-      [downloadedBuffer] = await storageFile.download();
+-    } catch {
+-      throw ApiError.uploadRejected(
+-        'Gagal memverifikasi isi berkas di Cloud Storage.',
+-        400,
+-      );
+-    }
++      const [exists] = await storageFile.exists();
++      if (!exists) {
++        const msg =
++          'Berkas bukti belum ditemukan di Cloud Storage. Unggah berkas ke uploadUrl terlebih dahulu sebelum finalisasi.';
++        throw ApiError.validation(msg, { evidenceId: msg });
++      }
+ 
+-    const bytes = new Uint8Array(downloadedBuffer);
++      let downloadedBuffer: Buffer;
++      try {
++        [downloadedBuffer] = await storageFile.download();
++      } catch {
++        throw ApiError.uploadRejected(
++          'Gagal memverifikasi isi berkas di Cloud Storage.',
++          400,
++        );
++      }
++      bytes = new Uint8Array(downloadedBuffer);
++    }
+ 
+     try {
+       if (bytes.byteLength < 1 || bytes.byteLength > EVIDENCE_MAX_BYTES) {
+@@ -347,7 +452,18 @@ export async function registerEvidenceUpload(
+       };
+     } catch (verifyOrDbError) {
+       // Hapus objek dari Storage bila gagal validasi signature/ukuran atau gagal commit ke Firestore (FILE-02 & FILE-04)
+-      await storageFile.delete({ ignoreNotFound: true }).catch(() => undefined);
++      if (provider === 'cloudinary') {
++        await deleteFromCloudinary({
++          storagePath,
++          contentType: input.contentType,
++          deliveryType: 'private',
++        }).catch(() => undefined);
++      } else {
++        await getAdminBucket()
++          .file(storagePath)
++          .delete({ ignoreNotFound: true })
++          .catch(() => undefined);
++      }
+       if (verifyOrDbError instanceof ApiError) {
+         throw verifyOrDbError;
+       }
+@@ -412,6 +528,18 @@ export async function uploadEvidenceBinary(
+   }
+ 
+   const file = fileEntry as File;
++
++  // Periksa ukuran dari metadata File sebelum membaca isi ke memori.
++  if (file.size < 1) {
++    throw ApiError.uploadRejected('Berkas bukti tidak boleh kosong.', 400, {
++      file: 'Berkas bukti tidak boleh kosong.',
++    });
++  }
++  if (file.size > EVIDENCE_MAX_BYTES) {
++    const msg = `Ukuran berkas melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
++    throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
++  }
++
+   const bytes = new Uint8Array(await file.arrayBuffer());
+   const computedSha256 = createHash('sha256').update(bytes).digest('hex');
+ 
+@@ -474,6 +602,7 @@ export async function authorizeEvidenceDownload(
+   const signed = await buildShortLivedStorageUrl(
+     evidenceData.storagePath,
+     'read',
++    evidenceData.contentType,
+   );
+ 
+   await recordAuditEvent({
+@@ -487,5 +616,9 @@ export async function authorizeEvidenceDownload(
+   return {
+     url: signed.url,
+     expiresInSeconds: signed.expiresInSeconds,
++    ...(signed.previewUrl ? { previewUrl: signed.previewUrl } : {}),
++    ...(signed.blurredPreviewUrl
++      ? { blurredPreviewUrl: signed.blurredPreviewUrl }
++      : {}),
+   };
+ }
+diff --git a/src/server/services/knowledge.service.ts b/src/server/services/knowledge.service.ts
+index eda8b7e..bdc6e1d 100644
+--- a/src/server/services/knowledge.service.ts
++++ b/src/server/services/knowledge.service.ts
+@@ -10,6 +10,12 @@
+ 
+ import { createHash } from 'node:crypto';
+ import type { DocumentData } from 'firebase-admin/firestore';
++import {
++  deleteFromCloudinary,
++  downloadBytesFromCloudinary,
++  resolveActiveStorageProvider,
++  uploadBytesToCloudinary,
++} from '@/lib/cloudinary';
+ import { getAdminBucket, getAdminDb } from '@/lib/firebase/admin';
+ import { toIsoDateString } from '@/lib/firebase/firestore';
+ import {
+@@ -318,16 +324,27 @@ export async function uploadKnowledgeDocument(
+   const computedSha256 = createHash('sha256').update(upload.bytes).digest('hex');
+   const now = new Date();
+ 
+-  const bucket = getAdminBucket();
+-  const storageFile = bucket.file(storagePath);
++  const provider = resolveActiveStorageProvider();
+ 
+-  await storageFile.save(Buffer.from(upload.bytes), {
+-    resumable: false,
+-    contentType: 'application/pdf',
+-    metadata: {
+-      cacheControl: 'private, no-store',
+-    },
+-  });
++  if (provider === 'cloudinary') {
++    await uploadBytesToCloudinary({
++      storagePath,
++      bytes: upload.bytes,
++      contentType: 'application/pdf',
++      fileName: upload.fileName,
++      deliveryType: 'private',
++    });
++  } else {
++    const bucket = getAdminBucket();
++    const storageFile = bucket.file(storagePath);
++    await storageFile.save(Buffer.from(upload.bytes), {
++      resumable: false,
++      contentType: 'application/pdf',
++      metadata: {
++        cacheControl: 'private, no-store',
++      },
++    });
++  }
+ 
+   const initialDoc: KnowledgeDocument = {
+     title: upload.title,
+@@ -356,7 +373,18 @@ export async function uploadKnowledgeDocument(
+     });
+     await batch.commit();
+   } catch (err) {
+-    await storageFile.delete({ ignoreNotFound: true }).catch(() => undefined);
++    if (provider === 'cloudinary') {
++      await deleteFromCloudinary({
++        storagePath,
++        contentType: 'application/pdf',
++        deliveryType: 'private',
++      }).catch(() => undefined);
++    } else {
++      await getAdminBucket()
++        .file(storagePath)
++        .delete({ ignoreNotFound: true })
++        .catch(() => undefined);
++    }
+     throw ApiError.internal(
+       err instanceof Error ? err.message : 'KB document commit failed',
+       'Gagal menyimpan metadata dokumen Knowledge Base.',
+@@ -453,12 +481,19 @@ export async function deleteKnowledgeDocument(
+ 
+   await batch.commit();
+ 
++  const provider = resolveActiveStorageProvider();
+   await Promise.all([
+     docData.storagePath
+-      ? getAdminBucket()
+-          .file(docData.storagePath)
+-          .delete({ ignoreNotFound: true })
+-          .catch(() => undefined)
++      ? provider === 'cloudinary'
++        ? deleteFromCloudinary({
++            storagePath: docData.storagePath,
++            contentType: 'application/pdf',
++            deliveryType: 'private',
++          }).catch(() => undefined)
++        : getAdminBucket()
++            .file(docData.storagePath)
++            .delete({ ignoreNotFound: true })
++            .catch(() => undefined)
+       : Promise.resolve(),
+     triggerRemoteAiDocumentDelete(documentId, requestId),
+   ]);
+@@ -475,7 +510,7 @@ export async function requestKnowledgeReindex(
+ ): Promise<KnowledgeReindexResult> {
+   const adminCaller = requireAdmin(caller);
+   const db = getAdminDb();
+-  const bucket = getAdminBucket();
++  const provider = resolveActiveStorageProvider();
+ 
+   await recordAuditEvent({
+     actorUid: adminCaller.uid,
+@@ -503,12 +538,27 @@ export async function requestKnowledgeReindex(
+     }
+ 
+     try {
+-      const [buffer] = await bucket.file(data.storagePath).download();
++      let pdfBytes: Uint8Array;
++      if (provider === 'cloudinary') {
++        const downloaded = await downloadBytesFromCloudinary({
++          storagePath: data.storagePath,
++          contentType: 'application/pdf',
++          deliveryType: 'private',
++        });
++        if (!downloaded) {
++          throw new Error('PDF_NOT_FOUND_IN_CLOUDINARY');
++        }
++        pdfBytes = downloaded;
++      } else {
++        const bucket = getAdminBucket();
++        const [buffer] = await bucket.file(data.storagePath).download();
++        pdfBytes = new Uint8Array(buffer);
++      }
+       const res = await ingestKnowledgeDocumentBytes({
+         docId: docSnap.id,
+         title: data.title,
+         version: data.version ?? 1,
+-        bytes: new Uint8Array(buffer),
++        bytes: pdfBytes,
+       });
+       if (res.status === 'indexed') {
+         indexedCount += 1;
+diff --git a/src/server/services/profile.service.ts b/src/server/services/profile.service.ts
+index add7dac..364aad5 100644
+--- a/src/server/services/profile.service.ts
++++ b/src/server/services/profile.service.ts
+@@ -9,7 +9,19 @@
+  */
+ 
+ import type { DocumentData } from 'firebase-admin/firestore';
+-import { getAdminAuth, getAdminDb } from '@/lib/firebase/admin';
++import {
++  buildCloudinaryPublicImageUrl,
++  deleteFromCloudinary,
++  resolveActiveStorageProvider,
++  uploadBytesToCloudinary,
++} from '@/lib/cloudinary';
++import {
++  getAdminAuth,
++  getAdminBucket,
++  getAdminDb,
++  isFirebaseEmulatorMode,
++  resolveAdminConfig,
++} from '@/lib/firebase/admin';
+ import { toIsoDateString } from '@/lib/firebase/firestore';
+ import {
+   INDISTINGUISHABLE_NOT_FOUND_MESSAGE,
+@@ -21,16 +33,39 @@ import {
+   recordAuditEventInBatch,
+   recordAuditEventInTransaction,
+ } from '@/server/services/audit.service';
++import { extensionForEvidenceType } from '@/server/validators/evidence.validator';
+ import type { UpdateProfileInput } from '@/server/validators/profile.validator';
+ import type { SerializedUserProfile } from '@/types/api';
+ import type { UserDocument, UserRole } from '@/types/domain';
+ 
+ export type { SerializedUserProfile };
+ 
++// Resolusi URL Foto Profil
++function resolveAvatarUrl(data: DocumentData): string | null | undefined {
++  if (typeof data.photoUrl === 'string' && data.photoUrl.trim().length > 0) {
++    return data.photoUrl;
++  }
++  if (typeof data.avatarPath === 'string' && data.avatarPath.trim().length > 0) {
++    if (resolveActiveStorageProvider() === 'cloudinary') {
++      return buildCloudinaryPublicImageUrl({
++        storagePath: data.avatarPath,
++        preset: 'avatar',
++      });
++    }
++    if (isFirebaseEmulatorMode()) {
++      const cfg = resolveAdminConfig();
++      const host = cfg.storageHost || '127.0.0.1:9199';
++      return `http://${host}/v0/b/${cfg.storageBucket}/o/${encodeURIComponent(data.avatarPath)}?alt=media`;
++    }
++  }
++  return undefined;
++}
++
+ function serializeUserDoc(
+   uid: string,
+   data: DocumentData,
+ ): SerializedUserProfile {
++  const resolvedPhotoUrl = resolveAvatarUrl(data);
+   return {
+     uid: String(data.uid ?? uid),
+     displayName: String(data.displayName ?? ''),
+@@ -38,6 +73,7 @@ function serializeUserDoc(
+     role: (data.role as UserRole) ?? 'reporter',
+     createdAt: toIsoDateString(data.createdAt),
+     updatedAt: toIsoDateString(data.updatedAt),
++    ...(resolvedPhotoUrl !== undefined ? { photoUrl: resolvedPhotoUrl } : {}),
+   };
+ }
+ 
+@@ -67,7 +103,8 @@ export async function getMyProfile(
+  * - Wajib lolos `requireAuthorizedUser(caller)` (tanpa hardcoded UID akun uji apa pun).
+  * - Akun yang tidak memiliki Custom Claim role maupun dokumen profil `users/{uid}`
+  *   otomatis ditolak dengan `403 FORBIDDEN`.
+- * - Hanya `displayName` dan `updatedAt` yang dapat diperbarui; `role`, `uid`, `email`, dan `createdAt` dikunci.
++ * - Hanya `displayName`, foto profil (`avatarPath`/`photoUrl`), dan `updatedAt` yang dapat diperbarui;
++ *   `role`, `uid`, `email`, dan `createdAt` dikunci.
+  */
+ export async function updateMyProfile(
+   caller: AuthenticatedCaller,
+@@ -78,35 +115,98 @@ export async function updateMyProfile(
+   const db = getAdminDb();
+   const userRef = db.collection('users').doc(authorized.uid);
+ 
+-  return db.runTransaction(async (tx) => {
+-    const snap = await tx.get(userRef);
+-    if (!snap.exists) {
+-      throw ApiError.notFound(INDISTINGUISHABLE_NOT_FOUND_MESSAGE);
++  const provider = resolveActiveStorageProvider();
++  let uploadedAvatarPath: string | null = null;
++  let uploadedPhotoUrl: string | null = null;
++
++  if (input.avatar) {
++    const ext = extensionForEvidenceType(input.avatar.contentType);
++    uploadedAvatarPath = `users/${authorized.uid}/avatar_${Date.now()}.${ext}`;
++
++    if (provider === 'cloudinary') {
++      await uploadBytesToCloudinary({
++        storagePath: uploadedAvatarPath,
++        bytes: input.avatar.bytes,
++        contentType: input.avatar.contentType,
++        fileName: input.avatar.fileName,
++        deliveryType: 'upload',
++      });
++      uploadedPhotoUrl = buildCloudinaryPublicImageUrl({
++        storagePath: uploadedAvatarPath,
++        preset: 'avatar',
++      });
++    } else {
++      const bucket = getAdminBucket();
++      await bucket.file(uploadedAvatarPath).save(Buffer.from(input.avatar.bytes), {
++        resumable: false,
++        contentType: input.avatar.contentType,
++        metadata: {
++          cacheControl: 'private, max-age=3600',
++        },
++      });
++      if (isFirebaseEmulatorMode()) {
++        const cfg = resolveAdminConfig();
++        const host = cfg.storageHost || '127.0.0.1:9199';
++        uploadedPhotoUrl = `http://${host}/v0/b/${cfg.storageBucket}/o/${encodeURIComponent(uploadedAvatarPath)}?alt=media`;
++      }
+     }
++  }
+ 
+-    const existingData = snap.data() as UserDocument;
+-    const now = new Date();
++  try {
++    return await db.runTransaction(async (tx) => {
++      const snap = await tx.get(userRef);
++      if (!snap.exists) {
++        throw ApiError.notFound(INDISTINGUISHABLE_NOT_FOUND_MESSAGE);
++      }
+ 
+-    tx.update(userRef, {
+-      displayName: input.displayName,
+-      updatedAt: now,
+-    });
++      const existingData = snap.data() as UserDocument;
++      const now = new Date();
+ 
+-    recordAuditEventInTransaction(tx, {
+-      actorUid: authorized.uid,
+-      action: 'user.profile_updated',
+-      targetType: 'user',
+-      targetId: authorized.uid,
+-      requestId,
+-      occurredAt: now,
+-    });
++      const updateFields: Record<string, unknown> = {
++        displayName: input.displayName,
++        updatedAt: now,
++        ...(uploadedAvatarPath
++          ? {
++              avatarPath: uploadedAvatarPath,
++              ...(uploadedPhotoUrl ? { photoUrl: uploadedPhotoUrl } : {}),
++            }
++          : {}),
++      };
++
++      tx.update(userRef, updateFields);
+ 
+-    return serializeUserDoc(authorized.uid, {
+-      ...existingData,
+-      displayName: input.displayName,
+-      updatedAt: now,
++      recordAuditEventInTransaction(tx, {
++        actorUid: authorized.uid,
++        action: 'user.profile_updated',
++        targetType: 'user',
++        targetId: authorized.uid,
++        requestId,
++        occurredAt: now,
++      });
++
++      return serializeUserDoc(authorized.uid, {
++        ...existingData,
++        ...updateFields,
++      });
+     });
+-  });
++  } catch (txError) {
++    // Kompensasi: hapus foto yatim bila transaksi Firestore gagal.
++    if (uploadedAvatarPath && input.avatar) {
++      if (provider === 'cloudinary') {
++        await deleteFromCloudinary({
++          storagePath: uploadedAvatarPath,
++          contentType: input.avatar.contentType,
++          deliveryType: 'upload',
++        }).catch(() => undefined);
++      } else {
++        await getAdminBucket()
++          .file(uploadedAvatarPath)
++          .delete({ ignoreNotFound: true })
++          .catch(() => undefined);
++      }
++    }
++    throw txError;
++  }
+ }
+ 
+ /**
+diff --git a/src/server/validators/conversation.validator.ts b/src/server/validators/conversation.validator.ts
+index 64774a2..6e26bbe 100644
+--- a/src/server/validators/conversation.validator.ts
++++ b/src/server/validators/conversation.validator.ts
+@@ -5,17 +5,35 @@ import {
+   validateRequiredString,
+   validateResourceId,
+ } from '@/server/validators/common';
++import {
++  assertValidFileSignature,
++  isEvidenceContentType,
++  validateCreateEvidenceInput,
++} from '@/server/validators/evidence.validator';
++import {
++  EVIDENCE_MAX_BYTES,
++  type EvidenceContentType,
++} from '@/types/domain';
+ 
+ export interface CreateConversationInput {
+   reportId: string | null;
+ }
+ 
++export interface SendMessageAttachmentInput {
++  fileName: string;
++  contentType: EvidenceContentType;
++  sizeBytes: number;
++  bytes: Uint8Array;
++}
++
+ export interface SendMessageInput {
+   body: string;
++  attachment?: SendMessageAttachmentInput | null;
+ }
+ 
+ const CREATE_CONVERSATION_ALLOWED_KEYS = ['reportId'] as const;
+ 
++// Validasi Pembuatan Percakapan
+ // Validasi Input Pembuatan Percakapan
+ export function validateCreateConversationInput(
+   payload: Record<string, unknown>,
+@@ -39,8 +57,9 @@ export function validateCreateConversationInput(
+   };
+ }
+ 
+-const SEND_MESSAGE_ALLOWED_KEYS = ['body'] as const;
++const SEND_MESSAGE_ALLOWED_KEYS = ['body', 'attachment'] as const;
+ 
++// Validasi Pesan JSON
+ // Validasi Input Pengiriman Pesan
+ export function validateSendMessageInput(
+   payload: Record<string, unknown>,
+@@ -52,7 +71,107 @@ export function validateSendMessageInput(
+     maxLength: 10000,
+   });
+ 
+-  return { body };
++  if (payload.attachment === undefined || payload.attachment === null) {
++    return { body };
++  }
++
++  if (typeof payload.attachment !== 'object' || Array.isArray(payload.attachment)) {
++    const msg = "Field 'attachment' harus berupa objek lampiran yang valid.";
++    throw ApiError.validation(msg, { attachment: msg });
++  }
++
++  const rawAtt = payload.attachment as Record<string, unknown>;
++  const validatedMeta = validateCreateEvidenceInput(rawAtt);
++
++  if (!validatedMeta.contentBase64) {
++    const msg = "Field 'attachment.contentBase64' wajib disertakan pada pengiriman lampiran via JSON.";
++    throw ApiError.validation(msg, { attachment: msg });
++  }
++
++  const maxBase64Chars = Math.ceil((EVIDENCE_MAX_BYTES * 4) / 3) + 1024;
++  if (validatedMeta.contentBase64.length > maxBase64Chars) {
++    const msg = `Ukuran lampiran melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
++    throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
++  }
++
++  const decoded = Buffer.from(validatedMeta.contentBase64, 'base64');
++  if (decoded.byteLength !== validatedMeta.sizeBytes) {
++    const msg = "Ukuran hasil dekode 'contentBase64' tidak sesuai dengan 'sizeBytes'.";
++    throw ApiError.validation(msg, { sizeBytes: msg });
++  }
++
++  const bytes = new Uint8Array(decoded);
++  assertValidFileSignature(bytes, validatedMeta.contentType);
++
++  return {
++    body,
++    attachment: {
++      fileName: validatedMeta.fileName,
++      contentType: validatedMeta.contentType,
++      sizeBytes: bytes.byteLength,
++      bytes,
++    },
++  };
++}
++
++// Validasi Pesan Multipart
++export async function validateMultipartSendMessageInput(
++  formData: FormData,
++): Promise<SendMessageInput> {
++  const rawBody = formData.get('body');
++  const fileEntry = formData.get('file');
++
++  const hasFile =
++    fileEntry !== null &&
++    typeof fileEntry !== 'string' &&
++    fileEntry instanceof Blob &&
++    fileEntry.size > 0;
++
++  const fallbackBody =
++    typeof rawBody === 'string' && rawBody.trim().length > 0
++      ? rawBody
++      : hasFile
++        ? `[Lampiran: ${(fileEntry as File).name || 'berkas'}]`
++        : '';
++
++  const body = validateRequiredString(fallbackBody, 'body', {
++    minLength: 1,
++    maxLength: 10000,
++  });
++
++  if (!hasFile) {
++    return { body };
++  }
++
++  const file = fileEntry as File;
++  if (file.size > EVIDENCE_MAX_BYTES) {
++    const msg = `Ukuran lampiran melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
++    throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
++  }
++
++  if (!isEvidenceContentType(file.type)) {
++    const msg = 'Tipe lampiran percakapan hanya mendukung JPG, PNG, atau PDF.';
++    throw ApiError.uploadRejected(msg, 400, { contentType: msg });
++  }
++
++  const bytes = new Uint8Array(await file.arrayBuffer());
++  const validatedMeta = validateCreateEvidenceInput({
++    fileName: file.name || 'attachment',
++    contentType: file.type,
++    sizeBytes: bytes.byteLength,
++  });
++
++  assertValidFileSignature(bytes, validatedMeta.contentType);
++
++  return {
++    body,
++    attachment: {
++      fileName: validatedMeta.fileName,
++      contentType: validatedMeta.contentType,
++      sizeBytes: bytes.byteLength,
++      bytes,
++    },
++  };
+ }
+ 
+ const ASSIGN_CONVERSATION_ALLOWED_KEYS = ['assignedAdminId', 'status'] as const;
+@@ -62,6 +181,7 @@ export interface UpdateConversationAdminInput {
+   status?: 'open' | 'closed';
+ }
+ 
++// Validasi Percakapan Admin
+ // Validasi Pembaruan Percakapan Admin
+ export function validateUpdateConversationAdminInput(
+   payload: Record<string, unknown>,
+diff --git a/src/server/validators/education.validator.ts b/src/server/validators/education.validator.ts
+index 71d7590..9a18c19 100644
+--- a/src/server/validators/education.validator.ts
++++ b/src/server/validators/education.validator.ts
+@@ -6,13 +6,25 @@ import {
+   validateRequiredString,
+   type PaginationParams,
+ } from '@/server/validators/common';
++import {
++  assertValidFileSignature,
++  validateCreateEvidenceInput,
++} from '@/server/validators/evidence.validator';
+ import {
+   EDUCATION_CATEGORIES,
+   EDUCATION_ICONS,
++  EVIDENCE_MAX_BYTES,
+   type EducationCategory,
+   type EducationIcon,
+ } from '@/types/domain';
+ 
++export interface EducationCoverUploadInput {
++  fileName: string;
++  contentType: 'image/jpeg' | 'image/png';
++  sizeBytes: number;
++  bytes: Uint8Array;
++}
++
+ export interface CreateEducationInput {
+   title: string;
+   slug?: string | null;
+@@ -24,6 +36,7 @@ export interface CreateEducationInput {
+   readingTimeMinutes?: number;
+   isPublished?: boolean;
+   sortOrder?: number;
++  coverImage?: EducationCoverUploadInput | null;
+ }
+ 
+ export interface UpdateEducationInput {
+@@ -37,6 +50,7 @@ export interface UpdateEducationInput {
+   readingTimeMinutes?: number;
+   isPublished?: boolean;
+   sortOrder?: number;
++  coverImage?: EducationCoverUploadInput | null;
+ }
+ 
+ export interface ListEducationQuery extends PaginationParams {
+@@ -57,10 +71,57 @@ const CREATE_EDUCATION_ALLOWED_KEYS = [
+   'readingTimeMinutes',
+   'isPublished',
+   'sortOrder',
++  'coverImage',
+ ] as const;
+ 
+ const UPDATE_EDUCATION_ALLOWED_KEYS = CREATE_EDUCATION_ALLOWED_KEYS;
+ 
++function parseCoverImageObject(
++  rawCover: unknown,
++): EducationCoverUploadInput | null {
++  if (rawCover === undefined || rawCover === null) {
++    return null;
++  }
++  if (typeof rawCover !== 'object' || Array.isArray(rawCover)) {
++    const msg = "Field 'coverImage' harus berupa objek berkas gambar sampul.";
++    throw ApiError.validation(msg, { coverImage: msg });
++  }
++
++  const meta = validateCreateEvidenceInput(rawCover as Record<string, unknown>);
++  if (meta.contentType !== 'image/jpeg' && meta.contentType !== 'image/png') {
++    const msg = 'Gambar sampul edukasi hanya mendukung format JPEG atau PNG.';
++    throw ApiError.uploadRejected(msg, 400, { contentType: msg });
++  }
++
++  if (!meta.contentBase64) {
++    const msg = "Field 'coverImage.contentBase64' wajib disertakan.";
++    throw ApiError.validation(msg, { coverImage: msg });
++  }
++
++  const maxBase64Chars = Math.ceil((EVIDENCE_MAX_BYTES * 4) / 3) + 1024;
++  if (meta.contentBase64.length > maxBase64Chars) {
++    const msg = `Ukuran gambar sampul melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
++    throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
++  }
++
++  const decoded = Buffer.from(meta.contentBase64, 'base64');
++  if (decoded.byteLength !== meta.sizeBytes) {
++    const msg =
++      "Ukuran hasil dekode 'contentBase64' tidak sesuai dengan 'sizeBytes'.";
++    throw ApiError.validation(msg, { sizeBytes: msg });
++  }
++
++  const bytes = new Uint8Array(decoded);
++  assertValidFileSignature(bytes, meta.contentType);
++
++  return {
++    fileName: meta.fileName,
++    contentType: meta.contentType,
++    sizeBytes: bytes.byteLength,
++    bytes,
++  };
++}
++
+ // Helper Validasi Kategori
+ function validateCategory(value: unknown): EducationCategory {
+   if (
+@@ -174,6 +235,7 @@ export function validateCreateEducationInput(
+   const readingTimeMinutes = validateReadingTime(payload.readingTimeMinutes);
+   const isPublished = validatePublished(payload.isPublished);
+   const sortOrder = validateSortOrder(payload.sortOrder);
++  const coverImage = parseCoverImageObject(payload.coverImage);
+ 
+   return {
+     title,
+@@ -186,6 +248,7 @@ export function validateCreateEducationInput(
+     readingTimeMinutes,
+     isPublished,
+     sortOrder,
++    ...(coverImage ? { coverImage } : {}),
+   };
+ }
+ 
+@@ -243,6 +306,9 @@ export function validateUpdateEducationInput(
+   if ('sortOrder' in payload) {
+     result.sortOrder = validateSortOrder(payload.sortOrder);
+   }
++  if ('coverImage' in payload) {
++    result.coverImage = parseCoverImageObject(payload.coverImage);
++  }
+ 
+   return result;
+ }
+diff --git a/src/server/validators/profile.validator.ts b/src/server/validators/profile.validator.ts
+index d830e4d..bc555fb 100644
+--- a/src/server/validators/profile.validator.ts
++++ b/src/server/validators/profile.validator.ts
+@@ -1,14 +1,70 @@
++import { ApiError } from '@/server/errors/api-error';
+ import {
+   assertAllowlistedKeys,
+   validateRequiredString,
+ } from '@/server/validators/common';
++import {
++  assertValidFileSignature,
++  validateCreateEvidenceInput,
++} from '@/server/validators/evidence.validator';
++import { EVIDENCE_MAX_BYTES } from '@/types/domain';
++
++export interface ProfileAvatarUploadInput {
++  fileName: string;
++  contentType: 'image/jpeg' | 'image/png';
++  sizeBytes: number;
++  bytes: Uint8Array;
++}
+ 
+ export interface UpdateProfileInput {
+   displayName: string;
++  avatar?: ProfileAvatarUploadInput | null;
+ }
+ 
+-const UPDATE_PROFILE_ALLOWED_KEYS = ['displayName'] as const;
++const UPDATE_PROFILE_ALLOWED_KEYS = ['displayName', 'avatar'] as const;
++
++// Validasi Objek Avatar
++function parseAvatarObject(rawAvatar: unknown): ProfileAvatarUploadInput {
++  if (!rawAvatar || typeof rawAvatar !== 'object' || Array.isArray(rawAvatar)) {
++    const msg = "Field 'avatar' harus berupa objek berkas foto profil.";
++    throw ApiError.validation(msg, { avatar: msg });
++  }
++
++  const meta = validateCreateEvidenceInput(rawAvatar as Record<string, unknown>);
++  if (meta.contentType !== 'image/jpeg' && meta.contentType !== 'image/png') {
++    const msg = 'Foto profil hanya mendukung format gambar JPEG atau PNG.';
++    throw ApiError.uploadRejected(msg, 400, { contentType: msg });
++  }
++
++  if (!meta.contentBase64) {
++    const msg = "Field 'avatar.contentBase64' wajib disertakan pada unggahan JSON.";
++    throw ApiError.validation(msg, { avatar: msg });
++  }
++
++  const maxBase64Chars = Math.ceil((EVIDENCE_MAX_BYTES * 4) / 3) + 1024;
++  if (meta.contentBase64.length > maxBase64Chars) {
++    const msg = `Ukuran foto profil melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
++    throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
++  }
+ 
++  const decoded = Buffer.from(meta.contentBase64, 'base64');
++  if (decoded.byteLength !== meta.sizeBytes) {
++    const msg = "Ukuran hasil dekode 'contentBase64' tidak sesuai dengan 'sizeBytes'.";
++    throw ApiError.validation(msg, { sizeBytes: msg });
++  }
++
++  const bytes = new Uint8Array(decoded);
++  assertValidFileSignature(bytes, meta.contentType);
++
++  return {
++    fileName: meta.fileName,
++    contentType: meta.contentType,
++    sizeBytes: bytes.byteLength,
++    bytes,
++  };
++}
++
++// Validasi Profil JSON
+ // Validasi Input Pembaruan Profil
+ export function validateUpdateProfileInput(
+   payload: Record<string, unknown>,
+@@ -28,5 +84,69 @@ export function validateUpdateProfileInput(
+     },
+   );
+ 
+-  return { displayName };
++  if (payload.avatar === undefined || payload.avatar === null) {
++    return { displayName };
++  }
++
++  return {
++    displayName,
++    avatar: parseAvatarObject(payload.avatar),
++  };
++}
++
++// Validasi Profil Multipart
++export async function validateMultipartUpdateProfileInput(
++  formData: FormData,
++  fallbackDisplayName?: string,
++): Promise<UpdateProfileInput> {
++  const rawName = formData.get('displayName');
++  const displayName = validateRequiredString(
++    typeof rawName === 'string' && rawName.trim().length > 0
++      ? rawName
++      : fallbackDisplayName ?? '',
++    'displayName',
++    {
++      minLength: 1,
++      maxLength: 120,
++    },
++  );
++
++  const fileEntry = formData.get('avatar') ?? formData.get('file');
++  if (
++    !fileEntry ||
++    typeof fileEntry === 'string' ||
++    !(fileEntry instanceof Blob) ||
++    fileEntry.size === 0
++  ) {
++    return { displayName };
++  }
++
++  const file = fileEntry as File;
++  if (file.size > EVIDENCE_MAX_BYTES) {
++    const msg = `Ukuran foto profil melebihi batas maksimum 5 MiB (${EVIDENCE_MAX_BYTES} byte).`;
++    throw ApiError.uploadRejected(msg, 413, { sizeBytes: msg });
++  }
++
++  if (file.type !== 'image/jpeg' && file.type !== 'image/png') {
++    const msg = 'Foto profil hanya mendukung format gambar JPEG atau PNG.';
++    throw ApiError.uploadRejected(msg, 400, { contentType: msg });
++  }
++
++  const bytes = new Uint8Array(await file.arrayBuffer());
++  const meta = validateCreateEvidenceInput({
++    fileName: file.name || 'avatar.jpg',
++    contentType: file.type,
++    sizeBytes: bytes.byteLength,
++  });
++  assertValidFileSignature(bytes, meta.contentType);
++
++  return {
++    displayName,
++    avatar: {
++      fileName: meta.fileName,
++      contentType: meta.contentType as 'image/jpeg' | 'image/png',
++      sizeBytes: bytes.byteLength,
++      bytes,
++    },
++  };
+ }
+diff --git a/src/tests/unit/cloudinary-integration.test.mjs b/src/tests/unit/cloudinary-integration.test.mjs
+new file mode 100644
+index 0000000..e76c2d3
+--- /dev/null
++++ b/src/tests/unit/cloudinary-integration.test.mjs
+@@ -0,0 +1,455 @@
++/**
++ * SISKA — Automated Verification Suite for Cloudinary Integration (Stages 1–5)
++ * Menguji:
++ * 1. Tahap 1: Cloudinary Adapter, Signature SHA-1, Resource Type Mapping (Image vs Raw PDF), EXIF Stripping & Blur URL
++ * 2. Tahap 2: Bukti Laporan (K1 Private Upload, Signed URL <= 300s + attachment=true, SEC-F05/F06/F07, & Compensating Rollback FILE-04)
++ * 3. Tahap 3: Lampiran Foto di Ruang Chat (Private Attachment Upload, Signed URL Peserta, & Anti-IDOR 404)
++ * 4. Tahap 4: Foto Profil Pengguna (Auto-Crop Avatar) & Gambar Sampul Materi Edukasi (CDN Optimized + Auto-Delete)
++ * 5. Tahap 5: CSP Headers pada next.config.ts
++ */
++
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { readFileSync } from 'node:fs';
++import { resolve as resolvePath } from 'node:path';
++
++import {
++  buildDataset,
++  UID,
++} from '../../../seed-data.mjs';
++
++import {
++  resetMockFirebaseAdmin,
++  seedMockDocs,
++  getMockDoc,
++  setSimulateNextCommitFailure,
++} from '../firebase-admin-mock.mjs';
++
++import { ApiError } from '@/server/errors/api-error';
++import {
++  resolveCloudinaryConfig,
++  resolveActiveStorageProvider,
++  signCloudinaryParams,
++  toCloudinaryPublicId,
++  buildCloudinarySignedDownloadUrl,
++  buildCloudinaryPublicImageUrl,
++} from '@/lib/cloudinary';
++import {
++  registerEvidenceUpload,
++  authorizeEvidenceDownload,
++} from '@/server/services/evidence.service';
++import {
++  createOrOpenConversation,
++  sendMessage,
++  authorizeMessageAttachmentDownload,
++} from '@/server/services/conversation.service';
++import { updateMyProfile } from '@/server/services/profile.service';
++import {
++  createEducationMaterial,
++  deleteEducationMaterial,
++} from '@/server/services/education.service';
++
++// Set env emulator default untuk Firestore/Auth mock pada worker test ini
++process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8085';
++process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
++process.env.FIREBASE_STORAGE_EMULATOR_HOST = '127.0.0.1:9199';
++process.env.FIREBASE_PROJECT_ID = 'demo-siska';
++
++// Valid JPEG & PNG binary fixtures (lolos Magic Bytes assertValidFileSignature)
++const VALID_JPEG_BYTES = new Uint8Array([
++  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
++  0x01, 0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00, 0xff, 0xd9,
++]);
++
++const VALID_PNG_BYTES = new Uint8Array([
++  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
++  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
++]);
++
++const CALLER_ADMIN_1 = {
++  uid: UID.admin1,
++  email: 'admin.a@siska.test',
++  role: 'admin',
++  claimVerified: true,
++};
++
++const CALLER_ADMIN_2 = {
++  uid: UID.admin2,
++  email: 'admin.b@siska.test',
++  role: 'admin',
++  claimVerified: true,
++};
++
++const CALLER_REPORTER_A = {
++  uid: UID.reporterA,
++  email: 'reporter.a@siska.test',
++  role: 'reporter',
++  claimVerified: true,
++};
++
++const CALLER_REPORTER_B = {
++  uid: UID.reporterB,
++  email: 'reporter.b@siska.test',
++  role: 'reporter',
++  claimVerified: true,
++};
++
++function withCloudinaryEnv(fn) {
++  return async () => {
++    const prevEnv = {
++      STORAGE_PROVIDER: process.env.STORAGE_PROVIDER,
++      CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
++      CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY,
++      CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET,
++      CLOUDINARY_UPLOAD_FOLDER: process.env.CLOUDINARY_UPLOAD_FOLDER,
++    };
++    const originalFetch = globalThis.fetch;
++
++    process.env.STORAGE_PROVIDER = 'cloudinary';
++    process.env.CLOUDINARY_CLOUD_NAME = 'demo-siska-cloud';
++    process.env.CLOUDINARY_API_KEY = '123456789012345';
++    process.env.CLOUDINARY_API_SECRET = 'siska_test_cloudinary_secret';
++    process.env.CLOUDINARY_UPLOAD_FOLDER = 'siska';
++
++    try {
++      await fn();
++    } finally {
++      globalThis.fetch = originalFetch;
++      for (const [k, v] of Object.entries(prevEnv)) {
++        if (v === undefined) delete process.env[k];
++        else process.env[k] = v;
++      }
++    }
++  };
++}
++
++// ── Tahap 1: Unit Test Adapter, Signature, & Transformasi URL ──────────────
++
++test(
++  'CLD-01 (Tahap 1): Konfigurasi Cloudinary, penandatanganan SHA-1, pemetaan resourceType (image vs raw PDF), dan URL EXIF-stripped + Blur bekerja akurat',
++  withCloudinaryEnv(async () => {
++    const cfg = resolveCloudinaryConfig();
++    assert.equal(cfg.enabled, true);
++    assert.equal(cfg.cloudName, 'demo-siska-cloud');
++    assert.equal(resolveActiveStorageProvider(), 'cloudinary');
++
++    // Pemetaan JPG/PNG -> image, PDF -> raw (aman untuk Cloudinary Free Tier)
++    const imgMap = toCloudinaryPublicId(
++      'reports/rpt_1/evidence/ev_1.jpg',
++      'image/jpeg',
++    );
++    assert.equal(imgMap.resourceType, 'image');
++    assert.equal(imgMap.publicId, 'siska/reports/rpt_1/evidence/ev_1');
++    assert.equal(imgMap.format, 'jpg');
++
++    const pdfMap = toCloudinaryPublicId(
++      'reports/rpt_1/evidence/ev_2.pdf',
++      'application/pdf',
++    );
++    assert.equal(pdfMap.resourceType, 'raw');
++    assert.equal(pdfMap.publicId, 'siska/reports/rpt_1/evidence/ev_2.pdf');
++
++    // Signed Download URL memiliki TTL <= 300s, attachment=true (SEC-F07), previewUrl (fl_strip_profile), & blurredPreviewUrl (e_blur:1200)
++    const signed = buildCloudinarySignedDownloadUrl({
++      storagePath: 'reports/rpt_1/evidence/ev_1.jpg',
++      contentType: 'image/jpeg',
++      expiresInSeconds: 999,
++    });
++    assert.equal(signed.expiresInSeconds, 300);
++    assert.match(signed.url, /api\.cloudinary\.com\/v1_1\/demo-siska-cloud\/image\/download/);
++    assert.match(signed.url, /attachment=true/);
++    assert.match(signed.previewUrl ?? '', /fl_strip_profile,f_auto,q_auto/);
++    assert.match(signed.blurredPreviewUrl ?? '', /e_blur:1200,fl_strip_profile/);
++
++    // Signature SHA-1 deterministik dan mengurutkan parameter secara alfabetis
++    const sig1 = signCloudinaryParams({ b: '2', a: '1' }, 'secret');
++    const sig2 = signCloudinaryParams({ a: '1', b: '2' }, 'secret');
++    assert.equal(sig1, sig2);
++    assert.equal(sig1.length, 40);
++  }),
++);
++
++// ── Tahap 2: Bukti Laporan via Cloudinary & Compensating Rollback ──────────
++
++test(
++  'CLD-02 (Tahap 2): Unggah foto bukti laporan ke Cloudinary (type=private, overwrite=false), Signed Download URL, Anti-IDOR, dan Compensating Delete saat DB gagal (FILE-04)',
++  withCloudinaryEnv(async () => {
++    resetMockFirebaseAdmin();
++    const ds = buildDataset();
++    seedMockDocs(ds.docs, ds.files);
++
++    const fetchCalls = [];
++    globalThis.fetch = async (url, init) => {
++      fetchCalls.push({ url: String(url), method: init?.method, body: init?.body });
++      return new Response(
++        JSON.stringify({
++          public_id: 'siska/reports/seed_rpt_a1/evidence/ev_cld_photo_1',
++          bytes: VALID_JPEG_BYTES.byteLength,
++          format: 'jpg',
++          secure_url: 'https://res.cloudinary.com/demo-siska-cloud/image/private/siska/reports/seed_rpt_a1/evidence/ev_cld_photo_1.jpg',
++        }),
++        { status: 200, headers: { 'content-type': 'application/json' } },
++      );
++    };
++
++    // 1. Reporter A mengunggah foto JPEG ke laporan miliknya via Cloudinary
++    const committed = await registerEvidenceUpload(
++      CALLER_REPORTER_A,
++      'seed_rpt_a1',
++      {
++        evidenceId: 'ev_cld_photo_1',
++        fileName: 'foto-bukti.jpg',
++        contentType: 'image/jpeg',
++        sizeBytes: VALID_JPEG_BYTES.byteLength,
++        contentBase64: Buffer.from(VALID_JPEG_BYTES).toString('base64'),
++      },
++      'req_cld_ev_1',
++    );
++
++    assert.equal(committed.status, 'committed');
++    assert.equal(
++      committed.storagePath,
++      'reports/seed_rpt_a1/evidence/ev_cld_photo_1.jpg',
++    );
++    assert.equal(fetchCalls.length, 1);
++    assert.match(fetchCalls[0].url, /\/image\/upload$/);
++
++    // Pastikan dokumen Firestore menyimpan storagePath (bukan URL publik!)
++    const storedEvDoc = getMockDoc(
++      'reports/seed_rpt_a1/evidence/ev_cld_photo_1',
++    );
++    assert.ok(storedEvDoc);
++    assert.equal(
++      storedEvDoc.storagePath,
++      'reports/seed_rpt_a1/evidence/ev_cld_photo_1.jpg',
++    );
++
++    // SEC-F05: Percobaan menimpa evidenceId yang sama harus ditolak 409 CONFLICT tanpa memanggil Cloudinary lagi
++    await assert.rejects(
++      () =>
++        registerEvidenceUpload(
++          CALLER_REPORTER_A,
++          'seed_rpt_a1',
++          {
++            evidenceId: 'ev_cld_photo_1',
++            fileName: 'foto-timpa.jpg',
++            contentType: 'image/jpeg',
++            sizeBytes: VALID_JPEG_BYTES.byteLength,
++            contentBase64: Buffer.from(VALID_JPEG_BYTES).toString('base64'),
++          },
++          'req_cld_dup',
++        ),
++      (err) => err instanceof ApiError && err.code === 'CONFLICT' && err.status === 409,
++    );
++    assert.equal(fetchCalls.length, 1);
++
++    // 2. Otorisasi unduhan bukti menghasilkan Signed URL Cloudinary + previewUrl + blurredPreviewUrl
++    const downloadGrant = await authorizeEvidenceDownload(
++      CALLER_REPORTER_A,
++      'seed_rpt_a1',
++      'ev_cld_photo_1',
++      'req_cld_dl_1',
++    );
++    assert.equal(downloadGrant.expiresInSeconds, 300);
++    assert.match(downloadGrant.url, /api\.cloudinary\.com\/v1_1\/demo-siska-cloud\/image\/download/);
++    assert.ok(downloadGrant.previewUrl);
++    assert.ok(downloadGrant.blurredPreviewUrl);
++
++    // 3. Anti-IDOR (FILE-03): Reporter B ditolak dengan 404 seragam
++    await assert.rejects(
++      () =>
++        authorizeEvidenceDownload(
++          CALLER_REPORTER_B,
++          'seed_rpt_a1',
++          'ev_cld_photo_1',
++          'req_cld_idor',
++        ),
++      (err) => err instanceof ApiError && err.status === 404,
++    );
++
++    // 4. FILE-04 Compensating Rollback: jika Firestore gagal commit, objek di Cloudinary otomatis dihapus (/destroy)
++    setSimulateNextCommitFailure(true);
++    await assert.rejects(
++      () =>
++        registerEvidenceUpload(
++          CALLER_REPORTER_A,
++          'seed_rpt_a1',
++          {
++            evidenceId: 'ev_cld_rollback',
++            fileName: 'foto-rollback.jpg',
++            contentType: 'image/jpeg',
++            sizeBytes: VALID_JPEG_BYTES.byteLength,
++            contentBase64: Buffer.from(VALID_JPEG_BYTES).toString('base64'),
++          },
++          'req_cld_rb',
++        ),
++      (err) => err instanceof ApiError && err.status === 500,
++    );
++
++    // Pastikan panggilan terakhir ke Cloudinary adalah endpoint /image/destroy
++    assert.equal(fetchCalls.length, 3);
++    assert.match(fetchCalls[1].url, /\/image\/upload$/);
++    assert.match(fetchCalls[2].url, /\/image\/destroy$/);
++  }),
++);
++
++// ── Tahap 3: Lampiran Foto pada Ruang Chat ─────────────────────────────────
++
++test(
++  'CLD-03 (Tahap 3): Pengiriman lampiran foto di ruang chat menyimpannya secara privat di Cloudinary dan hanya peserta sah yang dapat meminta Signed URL',
++  withCloudinaryEnv(async () => {
++    resetMockFirebaseAdmin();
++    const ds = buildDataset();
++    seedMockDocs(ds.docs, ds.files);
++
++    const fetchCalls = [];
++    globalThis.fetch = async (url) => {
++      fetchCalls.push(String(url));
++      return new Response(
++        JSON.stringify({
++          public_id: 'siska/conversations/conv_att/msg_1',
++          bytes: VALID_PNG_BYTES.byteLength,
++          format: 'png',
++        }),
++        { status: 200, headers: { 'content-type': 'application/json' } },
++      );
++    };
++
++    const { conversation } = await createOrOpenConversation(CALLER_REPORTER_A, {
++      reportId: 'seed_rpt_a1',
++    });
++
++    // Reporter A mengirim pesan dengan lampiran foto PNG
++    const msgWithPhoto = await sendMessage(
++      CALLER_REPORTER_A,
++      conversation.id,
++      {
++        body: 'Berikut tangkapan layar bukti percakapan tambahan.',
++        attachment: {
++          fileName: 'screenshot-chat.png',
++          contentType: 'image/png',
++          sizeBytes: VALID_PNG_BYTES.byteLength,
++          bytes: VALID_PNG_BYTES,
++        },
++      },
++    );
++
++    assert.ok(msgWithPhoto.attachmentPath);
++    assert.match(
++      msgWithPhoto.attachmentPath,
++      /^conversations\/.*\/attachments\/.*\.png$/,
++    );
++    assert.equal(fetchCalls.length, 1);
++    assert.match(fetchCalls[0], /\/image\/upload$/);
++
++    // Peserta sah (Reporter A & Admin 1) dapat mengambil Signed URL lampiran
++    const attSigned = await authorizeMessageAttachmentDownload(
++      CALLER_REPORTER_A,
++      conversation.id,
++      msgWithPhoto.id,
++      'req_chat_att_ok',
++    );
++    assert.equal(attSigned.expiresInSeconds, 300);
++    assert.ok(attSigned.previewUrl);
++    assert.match(attSigned.previewUrl, /fl_strip_profile/);
++
++    // Non-peserta (Reporter B) ditolak 404 NOT_FOUND (Anti-IDOR)
++    await assert.rejects(
++      () =>
++        authorizeMessageAttachmentDownload(
++          CALLER_REPORTER_B,
++          conversation.id,
++          msgWithPhoto.id,
++          'req_chat_att_idor',
++        ),
++      (err) => err instanceof ApiError && err.status === 404,
++    );
++  }),
++);
++
++// ── Tahap 4: Foto Profil Pengguna & Gambar Sampul Materi Edukasi ───────────
++
++test(
++  'CLD-04 (Tahap 4): Unggah foto profil pengguna (avatar auto-crop) dan gambar sampul materi edukasi (beserta penghapusan otomatis saat materi dihapus)',
++  withCloudinaryEnv(async () => {
++    resetMockFirebaseAdmin();
++    const ds = buildDataset();
++    seedMockDocs(ds.docs, ds.files);
++
++    const fetchCalls = [];
++    globalThis.fetch = async (url) => {
++      fetchCalls.push(String(url));
++      return new Response(
++        JSON.stringify({
++          public_id: 'siska/asset',
++          bytes: VALID_JPEG_BYTES.byteLength,
++          format: 'jpg',
++        }),
++        { status: 200, headers: { 'content-type': 'application/json' } },
++      );
++    };
++
++    // 1. Reporter A memperbarui profil sekaligus mengunggah foto avatar
++    const updatedProfile = await updateMyProfile(
++      CALLER_REPORTER_A,
++      {
++        displayName: 'Pelapor A Dengan Avatar',
++        avatar: {
++          fileName: 'profil.jpg',
++          contentType: 'image/jpeg',
++          sizeBytes: VALID_JPEG_BYTES.byteLength,
++          bytes: VALID_JPEG_BYTES,
++        },
++      },
++      'req_prof_avatar',
++    );
++
++    assert.equal(updatedProfile.displayName, 'Pelapor A Dengan Avatar');
++    assert.ok(updatedProfile.photoUrl);
++    assert.match(
++      updatedProfile.photoUrl,
++      /res\.cloudinary\.com\/demo-siska-cloud\/image\/upload\/c_fill,g_auto,w_256,h_256,fl_strip_profile,f_auto,q_auto/,
++    );
++
++    // 2. Admin 1 membuat materi edukasi dengan gambar sampul (coverImage)
++    const createdEdu = await createEducationMaterial(
++      CALLER_ADMIN_1,
++      {
++        title: 'Infografis Pencegahan Kekerasan Seksual',
++        tag: 'Infografis',
++        category: 'general',
++        icon: 'shield',
++        excerpt: 'Panduan visual pencegahan kekerasan di lingkungan kampus.',
++        content: 'Isi lengkap materi edukasi beserta infografis pendukung.',
++        coverImage: {
++          fileName: 'poster-edukasi.png',
++          contentType: 'image/png',
++          sizeBytes: VALID_PNG_BYTES.byteLength,
++          bytes: VALID_PNG_BYTES,
++        },
++      },
++      'req_edu_cover',
++    );
++
++    assert.ok(createdEdu.coverImageUrl);
++    assert.match(
++      createdEdu.coverImageUrl,
++      /res\.cloudinary\.com\/demo-siska-cloud\/image\/upload\/c_limit,w_1200,fl_strip_profile,f_auto,q_auto/,
++    );
++
++    // 3. Saat materi edukasi dihapus, gambar sampul di Cloudinary ikut dihapus (/image/destroy)
++    await deleteEducationMaterial(CALLER_ADMIN_1, createdEdu.id, 'req_edu_del_cover');
++    assert.match(fetchCalls[fetchCalls.length - 1], /\/image\/destroy$/);
++  }),
++);
++
++// ── Tahap 5: Verifikasi CSP Headers pada next.config.ts ────────────────────
++
++test('CLD-05 (Tahap 5): Content-Security-Policy pada next.config.ts mengizinkan domain Cloudinary (res.cloudinary.com & api.cloudinary.com)', () => {
++  const nextConfigContent = readFileSync(
++    resolvePath(process.cwd(), 'next.config.ts'),
++    'utf8',
++  );
++  assert.match(nextConfigContent, /img-src[^;]*https:\/\/res\.cloudinary\.com/);
++  assert.match(nextConfigContent, /connect-src[^;]*https:\/\/api\.cloudinary\.com/);
++});
+diff --git a/src/types/api.ts b/src/types/api.ts
+index db5ca0a..f6485fe 100644
+--- a/src/types/api.ts
++++ b/src/types/api.ts
+@@ -71,6 +71,7 @@ export interface SerializedUserProfile {
+   role: UserRole;
+   createdAt: string;
+   updatedAt: string;
++  photoUrl?: string | null;
+ }
+ 
+ /* ========================================================================== */
+@@ -138,6 +139,8 @@ export interface CreateEvidenceResult {
+ export interface SignedDownloadUrlResult {
+   url: string;
+   expiresInSeconds: number;
++  previewUrl?: string | null;
++  blurredPreviewUrl?: string | null;
+ }
+ 
+ /* ========================================================================== */
+@@ -265,6 +268,7 @@ export interface SerializedEducationItem {
+   createdBy: string;
+   createdAt: string;
+   updatedAt: string;
++  coverImageUrl?: string | null;
+ }
+ 
+ export type PaginatedEducationResult = PaginatedResponse<SerializedEducationItem>;
+diff --git a/src/types/domain.ts b/src/types/domain.ts
+index 4c3950d..222d193 100644
+--- a/src/types/domain.ts
++++ b/src/types/domain.ts
+@@ -62,6 +62,8 @@ export interface UserDocument {
+   role: UserRole;
+   createdAt: Date | string;
+   updatedAt: Date | string;
++  avatarPath?: string | null;
++  photoUrl?: string | null;
+ }
+ 
+ export interface ReportDocument {
+@@ -159,6 +161,8 @@ export interface EducationDocument {
+   createdBy: string;
+   createdAt: Date | string;
+   updatedAt: Date | string;
++  coverImageUrl?: string | null;
++  coverStoragePath?: string | null;
+ }
+ 
+ export const NOTIFICATION_TYPES = [
