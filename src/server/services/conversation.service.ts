@@ -34,6 +34,7 @@ import {
   recordAuditEvent,
   recordAuditEventInTransaction,
 } from '@/server/services/audit.service';
+import { decodeReportDocument } from '@/server/services/report.service';
 import type { PaginationParams } from '@/server/validators/common';
 import type {
   CreateConversationInput,
@@ -53,7 +54,6 @@ import {
   type ConversationDocument,
   type ConversationStatus,
   type MessageDocument,
-  type ReportDocument,
 } from '@/types/domain';
 
 export type {
@@ -215,7 +215,7 @@ export async function createOrOpenConversation(
       const reportRef = db.collection('reports').doc(targetReportId);
       const reportSnap = await tx.get(reportRef);
       const reportData = reportSnap.exists
-        ? (reportSnap.data() as ReportDocument)
+        ? decodeReportDocument(reportSnap.data()!)
         : null;
       assertCanReadReport(authorized, reportData);
     }

@@ -1,6 +1,6 @@
 // Layanan Domain Laporan
 
-import type { DocumentData, Query } from 'firebase-admin/firestore';
+import type { DocumentData } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebase/admin';
 import { toIsoDateString, toIsoStringOrNull } from '@/lib/firebase/firestore';
 import {
@@ -36,6 +36,7 @@ import type {
   SerializedStatusHistoryItem,
 } from '@/types/api';
 import type {
+  EncryptedReportData,
   EvidenceContentType,
   ReportDocument,
   ReportStatus,
@@ -73,23 +74,53 @@ async function generateUniqueReportId(db: ReturnType<typeof getAdminDb>, date: D
   throw new Error('Tidak dapat membuat ID laporan unik hari ini.');
 }
 
-interface EncryptedReportFields {
-  description: string;
-  location: string | null;
+function hasOwnField(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-function extractReportSensitiveFields(data: DocumentData): EncryptedReportFields {
+// Dekode Dokumen Laporan (Mendukung Full-Encrypted, 2-Field Encrypted, dan Plaintext Lama)
+export function decodeReportDocument(data: DocumentData): EncryptedReportData {
   if (isEncryptedPayload(data.encryptedData)) {
-    const decrypted = decryptJson<EncryptedReportFields>(data.encryptedData);
+    const decrypted = decryptJson<Partial<EncryptedReportData>>(data.encryptedData);
     if (!decrypted || typeof decrypted !== 'object' || Array.isArray(decrypted)) {
       throw ApiError.internal(
         'Struktur payload laporan terenkripsi tidak valid.',
         'Data laporan tidak dapat didekripsi.',
       );
     }
+
+    const rawIncidentAt = hasOwnField(decrypted, 'incidentAt')
+      ? decrypted.incidentAt
+      : data.incidentAt;
+    const rawLocation = hasOwnField(decrypted, 'location')
+      ? decrypted.location
+      : data.location;
+    const rawResolvedAt = hasOwnField(decrypted, 'resolvedAt')
+      ? decrypted.resolvedAt
+      : data.resolvedAt;
+
     return {
-      description: typeof decrypted.description === 'string' ? decrypted.description : '',
-      location: typeof decrypted.location === 'string' ? decrypted.location : null,
+      reporterId: hasOwnField(decrypted, 'reporterId')
+        ? String(decrypted.reporterId ?? '')
+        : String(data.reporterId ?? ''),
+      category: hasOwnField(decrypted, 'category')
+        ? String(decrypted.category ?? '')
+        : String(data.category ?? ''),
+      incidentAt: rawIncidentAt ?? null,
+      location: typeof rawLocation === 'string' ? rawLocation : null,
+      description: hasOwnField(decrypted, 'description')
+        ? String(decrypted.description ?? '')
+        : String(data.description ?? ''),
+      status: (hasOwnField(decrypted, 'status')
+        ? decrypted.status
+        : data.status) as ReportStatus,
+      createdAt: hasOwnField(decrypted, 'createdAt')
+        ? (decrypted.createdAt ?? new Date(0))
+        : (data.createdAt ?? new Date(0)),
+      updatedAt: hasOwnField(decrypted, 'updatedAt')
+        ? (decrypted.updatedAt ?? new Date(0))
+        : (data.updatedAt ?? new Date(0)),
+      resolvedAt: rawResolvedAt ?? null,
     };
   }
 
@@ -102,26 +133,36 @@ function extractReportSensitiveFields(data: DocumentData): EncryptedReportFields
 
   // Fallback kompatibel untuk data lama/seed yang masih tersimpan plaintext
   return {
-    description: String(data.description ?? ''),
+    reporterId: String(data.reporterId ?? ''),
+    category: String(data.category ?? ''),
+    incidentAt: data.incidentAt ?? null,
     location: typeof data.location === 'string' ? data.location : null,
+    description: String(data.description ?? ''),
+    status: data.status as ReportStatus,
+    createdAt: data.createdAt ?? new Date(0),
+    updatedAt: data.updatedAt ?? new Date(0),
+    resolvedAt: data.resolvedAt ?? null,
+  };
+}
+
+function toSerializedReport(id: string, decoded: EncryptedReportData): SerializedReport {
+  return {
+    id,
+    reporterId: decoded.reporterId,
+    category: decoded.category,
+    incidentAt: toIsoStringOrNull(decoded.incidentAt),
+    location: decoded.location,
+    description: decoded.description,
+    status: decoded.status,
+    createdAt: toIsoDateString(decoded.createdAt),
+    updatedAt: toIsoDateString(decoded.updatedAt),
+    resolvedAt: toIsoStringOrNull(decoded.resolvedAt),
   };
 }
 
 // Serialisasi Dokumen Laporan
 function serializeReportDoc(id: string, data: DocumentData): SerializedReport {
-  const { description, location } = extractReportSensitiveFields(data);
-  return {
-    id,
-    reporterId: String(data.reporterId ?? ''),
-    category: String(data.category ?? ''),
-    incidentAt: toIsoStringOrNull(data.incidentAt),
-    location,
-    description,
-    status: data.status as ReportStatus,
-    createdAt: toIsoDateString(data.createdAt),
-    updatedAt: toIsoDateString(data.updatedAt),
-    resolvedAt: toIsoStringOrNull(data.resolvedAt),
-  };
+  return toSerializedReport(id, decodeReportDocument(data));
 }
 
 // Pembuatan Laporan Baru
@@ -137,20 +178,20 @@ export async function createReport(
   const reportRef = db.collection('reports').doc(reportId);
   const historyRef = reportRef.collection('statusHistory').doc();
 
-  const encryptedData = encryptJson<EncryptedReportFields>({
-    description: input.description,
-    location: input.location ?? null,
-  });
-
-  const reportData: ReportDocument = {
+  const fullPayload: EncryptedReportData = {
     reporterId: authorized.uid,
     category: input.category,
-    incidentAt: input.incidentAt ?? null,
+    incidentAt: input.incidentAt ? input.incidentAt.toISOString() : null,
+    location: input.location ?? null,
+    description: input.description,
     status: 'submitted',
-    createdAt: now,
-    updatedAt: now,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
     resolvedAt: null,
-    encryptedData,
+  };
+
+  const reportData: ReportDocument = {
+    encryptedData: encryptJson<EncryptedReportData>(fullPayload),
   };
 
   const adminUsers = await db.collection('users').where('role', '==', 'admin').get();
@@ -201,47 +242,52 @@ export async function listReports(
   const authorized = requireRole(caller, ['reporter', 'admin']);
   const db = getAdminDb();
 
-  let fsQuery: Query = db.collection('reports');
+  const snapshot = await db.collection('reports').get();
+  const allReports = snapshot.docs.map((doc) =>
+    serializeReportDoc(doc.id, doc.data()),
+  );
 
-  if (authorized.role === 'reporter') {
-    fsQuery = fsQuery.where('reporterId', '==', authorized.uid);
-  }
+  const visibleReports =
+    authorized.role === 'reporter'
+      ? allReports.filter((item) => item.reporterId === authorized.uid)
+      : allReports;
 
-  if (query.status) {
-    fsQuery = fsQuery.where('status', '==', query.status);
-  }
+  visibleReports.sort((a, b) => {
+    const timeDiff =
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    return timeDiff !== 0 ? timeDiff : b.id.localeCompare(a.id);
+  });
 
-  fsQuery = fsQuery.orderBy('createdAt', 'desc');
+  const filteredReports = query.status
+    ? visibleReports.filter((item) => item.status === query.status)
+    : visibleReports;
 
+  let afterCursor = filteredReports;
   if (query.cursor) {
-    const cursorSnap = await db.collection('reports').doc(query.cursor).get();
-    const cursorData = cursorSnap.exists
-      ? (cursorSnap.data() as ReportDocument | undefined)
-      : undefined;
-
-    if (
-      !cursorSnap.exists ||
-      (authorized.role === 'reporter' &&
-        cursorData?.reporterId !== authorized.uid)
-    ) {
+    const cursorReport = visibleReports.find((item) => item.id === query.cursor);
+    if (!cursorReport) {
       const msg = "Parameter 'cursor' tidak valid.";
       throw ApiError.validation(msg, { cursor: msg });
     }
-    fsQuery = fsQuery.startAfter(cursorSnap);
+    const cursorTime = new Date(cursorReport.createdAt).getTime();
+    afterCursor = filteredReports.filter((item) => {
+      const itemTime = new Date(item.createdAt).getTime();
+      return (
+        itemTime < cursorTime ||
+        (itemTime === cursorTime && item.id.localeCompare(cursorReport.id) < 0)
+      );
+    });
   }
 
-  const snapshot = await fsQuery.limit(query.limit + 1).get();
-  const hasMore = snapshot.docs.length > query.limit;
-  const pageDocs = hasMore ? snapshot.docs.slice(0, query.limit) : snapshot.docs;
-
-  const items = pageDocs.map((doc) => serializeReportDoc(doc.id, doc.data()));
+  const pageItems = afterCursor.slice(0, query.limit);
+  const hasMore = afterCursor.length > query.limit;
   const nextCursor =
-    hasMore && pageDocs.length > 0
-      ? pageDocs[pageDocs.length - 1].id
+    hasMore && pageItems.length > 0
+      ? pageItems[pageItems.length - 1].id
       : null;
 
   return {
-    items,
+    items: pageItems,
     nextCursor,
   };
 }
@@ -256,7 +302,7 @@ export async function getReportDetail(
   const reportSnap = await reportRef.get();
 
   const reportData = reportSnap.exists
-    ? (reportSnap.data() as ReportDocument)
+    ? decodeReportDocument(reportSnap.data() as DocumentData)
     : null;
 
   assertCanReadReport(caller, reportData);
@@ -294,7 +340,7 @@ export async function getReportDetail(
   );
 
   return {
-    ...serializeReportDoc(reportSnap.id, reportData as DocumentData),
+    ...toSerializedReport(reportSnap.id, reportData as EncryptedReportData),
     evidence,
     statusHistory,
   };
@@ -317,20 +363,31 @@ export async function updateReportStatus(
       throw ApiError.notFound(INDISTINGUISHABLE_NOT_FOUND_MESSAGE);
     }
 
-    const currentData = reportSnap.data() as ReportDocument;
+    const currentData = decodeReportDocument(reportSnap.data() as DocumentData);
     const fromStatus = currentData.status;
     const toStatus = input.status;
 
     assertValidStatusTransition(fromStatus, toStatus, input.note);
 
     const now = new Date();
-    const resolvedAt = toStatus === 'resolved' ? now : null;
-
-    tx.update(reportRef, {
+    const resolvedAt = toStatus === 'resolved' ? now.toISOString() : null;
+    const updatedPayload: EncryptedReportData = {
+      reporterId: currentData.reporterId,
+      category: currentData.category,
+      incidentAt: toIsoStringOrNull(currentData.incidentAt),
+      location: currentData.location,
+      description: currentData.description,
       status: toStatus,
-      updatedAt: now,
+      createdAt: toIsoDateString(currentData.createdAt),
+      updatedAt: now.toISOString(),
       resolvedAt,
-    });
+    };
+
+    const updatedDoc: ReportDocument = {
+      encryptedData: encryptJson<EncryptedReportData>(updatedPayload),
+    };
+
+    tx.set(reportRef, updatedDoc);
 
     const historyRef = reportRef.collection('statusHistory').doc();
     tx.create(historyRef, {
@@ -378,12 +435,7 @@ export async function updateReportStatus(
       });
     }
 
-    return serializeReportDoc(reportId, {
-      ...currentData,
-      status: toStatus,
-      updatedAt: now,
-      resolvedAt,
-    });
+    return toSerializedReport(reportId, updatedPayload);
   });
 
   return updatedReport;
@@ -404,19 +456,15 @@ export async function getReportsSummary(
     rejected: 0,
   };
 
-  let fsQuery: Query = db.collection('reports').select('status');
-  if (authorized.role === 'reporter') {
-    fsQuery = db
-      .collection('reports')
-      .where('reporterId', '==', authorized.uid)
-      .select('status');
-  }
-
-  const snap = await fsQuery.get();
+  const snap = await db.collection('reports').get();
   let total = 0;
 
   for (const doc of snap.docs) {
-    const status = doc.data().status as ReportStatus | undefined;
+    const decoded = decodeReportDocument(doc.data());
+    if (authorized.role === 'reporter' && decoded.reporterId !== authorized.uid) {
+      continue;
+    }
+    const status = decoded.status;
     if (status && (REPORT_STATUSES as readonly string[]).includes(status)) {
       byStatus[status] += 1;
       total += 1;

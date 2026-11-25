@@ -26,6 +26,7 @@ import {
   recordAuditEvent,
   recordAuditEventInBatch,
 } from '@/server/services/audit.service';
+import { decodeReportDocument } from '@/server/services/report.service';
 import {
   assertValidFileSignature,
   extensionForEvidenceType,
@@ -42,7 +43,6 @@ import {
   EVIDENCE_SIGNED_URL_EXPIRES_SECONDS,
   type EvidenceContentType,
   type EvidenceDocument,
-  type ReportDocument,
 } from '@/types/domain';
 
 export type {
@@ -266,7 +266,7 @@ export async function registerEvidenceUpload(
   const reportSnap = await reportRef.get();
 
   const reportData = reportSnap.exists
-    ? (reportSnap.data() as ReportDocument)
+    ? decodeReportDocument(reportSnap.data()!)
     : null;
 
   const authorized = assertCanUploadEvidence(caller, reportData);
@@ -473,7 +473,7 @@ export async function uploadEvidenceBinary(
   const reportRef = db.collection('reports').doc(reportId);
   const reportSnap = await reportRef.get();
   const reportData = reportSnap.exists
-    ? (reportSnap.data() as ReportDocument)
+    ? decodeReportDocument(reportSnap.data()!)
     : null;
 
   const authorized = assertCanUploadEvidence(caller, reportData);
@@ -537,7 +537,7 @@ export async function authorizeEvidenceDownload(
   const reportSnap = await reportRef.get();
 
   const reportData = reportSnap.exists
-    ? (reportSnap.data() as ReportDocument)
+    ? decodeReportDocument(reportSnap.data()!)
     : null;
 
   const authorized = assertCanDownloadEvidence(caller, reportData);

@@ -49,6 +49,18 @@ export interface EncryptedPayload {
   tag: string;
 }
 
+export interface EncryptedReportData {
+  reporterId: string;
+  category: string;
+  incidentAt: Date | string | null;
+  location: string | null;
+  description: string;
+  status: ReportStatus;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  resolvedAt: Date | string | null;
+}
+
 // Dokumen Firestore
 export interface UserDocument {
   uid: string;
@@ -62,15 +74,15 @@ export interface UserDocument {
 }
 
 export interface ReportDocument {
-  reporterId: string;
-  category: string;
-  incidentAt: Date | string | null;
+  reporterId?: string;
+  category?: string;
+  incidentAt?: Date | string | null;
   location?: string | null;
   description?: string;
   encryptedData?: EncryptedPayload;
-  status: ReportStatus;
-  createdAt: Date | string;
-  updatedAt: Date | string;
+  status?: ReportStatus;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
   resolvedAt?: Date | string | null;
 }
 

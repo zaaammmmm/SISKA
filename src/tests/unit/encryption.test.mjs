@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 
-import { buildDataset, UID } from '../../../seed-data.mjs';
+import { buildDataset, makePdf, UID } from '../../../seed-data.mjs';
 import {
   getMockDoc,
   resetMockFirebaseAdmin,
@@ -33,8 +33,13 @@ import {
   updateConversationByAdmin,
 } from '@/server/services/conversation.service';
 import {
+  authorizeEvidenceDownload,
+  registerEvidenceUpload,
+} from '@/server/services/evidence.service';
+import {
   createReport,
   getReportDetail,
+  getReportsSummary,
   listReports,
   updateReportStatus,
 } from '@/server/services/report.service';
@@ -62,6 +67,13 @@ const CALLER_ADMIN_1 = {
 const CALLER_REPORTER_A = {
   uid: UID.reporterA,
   email: 'reporter.a@siska.test',
+  role: 'reporter',
+  claimVerified: true,
+};
+
+const CALLER_REPORTER_B = {
+  uid: UID.reporterB,
+  email: 'reporter.b@siska.test',
   role: 'reporter',
   claimVerified: true,
 };
@@ -141,7 +153,7 @@ test('ENC-01: Helper AES-256-GCM menghasilkan iv unik, mendukung key hex/base64,
   })();
 });
 
-test('ENC-02: Laporan baru menyimpan encryptedData (description & location) di Firestore dan terdekripsi pada API baca/status', async () => {
+test('ENC-02: Laporan baru menyimpan seluruh 9 field terenkripsi di encryptedData Firestore dan terdekripsi pada semua endpoint/service', async () => {
   resetMockFirebaseAdmin();
 
   const incidentAt = new Date('2026-11-06T02:10:00+07:00');
@@ -157,28 +169,19 @@ test('ENC-02: Laporan baru menyimpan encryptedData (description & location) di F
   );
 
   // Respons API kembali dalam bentuk plaintext terdekripsi untuk UI
+  assert.equal(created.reporterId, CALLER_REPORTER_A.uid);
   assert.equal(created.category, 'Perundungan');
   assert.equal(created.location, 'Ruang Rapat Lantai 3');
   assert.equal(
     created.description,
     'Narasi kronologi sensitif pelapor yang harus terenkripsi.',
   );
+  assert.equal(created.status, 'submitted');
 
-  // Dokumen mentah di Firestore harus sesuai struktur PM (tanpa description/location plaintext)
+  // Dokumen mentah di Firestore hanya boleh berisi encryptedData (seluruh 9 field terenkripsi)
   const stored = getMockDoc(`reports/${created.id}`);
   assert.ok(stored);
-  assert.deepEqual(Object.keys(stored).sort(), [
-    'category',
-    'createdAt',
-    'encryptedData',
-    'incidentAt',
-    'reporterId',
-    'resolvedAt',
-    'status',
-    'updatedAt',
-  ]);
-  assert.equal('description' in stored, false);
-  assert.equal('location' in stored, false);
+  assert.deepEqual(Object.keys(stored), ['encryptedData']);
   assert.equal(isEncryptedPayload(stored.encryptedData), true);
   assert.deepEqual(Object.keys(stored.encryptedData).sort(), [
     'ciphertext',
@@ -186,26 +189,88 @@ test('ENC-02: Laporan baru menyimpan encryptedData (description & location) di F
     'tag',
   ]);
 
+  // Laporan kedua milik Reporter B untuk menguji isolasi, filter, pagination cursor, dan summary
+  const createdB = await createReport(
+    CALLER_REPORTER_B,
+    {
+      category: 'Lainnya',
+      incidentAt: null,
+      location: null,
+      description: 'Laporan milik pelapor B.',
+    },
+    'req_enc_rep_2',
+  );
+
   const detail = await getReportDetail(CALLER_REPORTER_A, created.id);
+  assert.equal(detail.reporterId, CALLER_REPORTER_A.uid);
+  assert.equal(detail.category, 'Perundungan');
   assert.equal(detail.location, 'Ruang Rapat Lantai 3');
   assert.equal(
     detail.description,
     'Narasi kronologi sensitif pelapor yang harus terenkripsi.',
   );
 
-  const page = await listReports(CALLER_REPORTER_A, {
+  // Isolasi IDOR lintas reporter tetap berjalan saat reporterId terenkripsi
+  await assert.rejects(
+    () => getReportDetail(CALLER_REPORTER_B, created.id),
+    (err) => err instanceof ApiError && err.status === 404,
+  );
+
+  const pageA = await listReports(CALLER_REPORTER_A, {
     cursor: null,
     limit: 20,
     status: null,
   });
-  const listed = page.items.find((item) => item.id === created.id);
-  assert.ok(listed);
-  assert.equal(listed.location, 'Ruang Rapat Lantai 3');
-  assert.equal(
-    listed.description,
-    'Narasi kronologi sensitif pelapor yang harus terenkripsi.',
-  );
+  assert.equal(pageA.items.length, 1);
+  assert.equal(pageA.items[0].id, created.id);
 
+  // Paginasi cursor & filter status admin bekerja pada dokumen full-encrypted
+  const adminPage1 = await listReports(CALLER_ADMIN_1, {
+    cursor: null,
+    limit: 1,
+    status: 'submitted',
+  });
+  assert.equal(adminPage1.items.length, 1);
+  assert.ok(adminPage1.nextCursor);
+  const adminPage2 = await listReports(CALLER_ADMIN_1, {
+    cursor: adminPage1.nextCursor,
+    limit: 1,
+    status: 'submitted',
+  });
+  assert.equal(adminPage2.items.length, 1);
+  assert.notEqual(adminPage2.items[0].id, adminPage1.items[0].id);
+
+  const summaryA = await getReportsSummary(CALLER_REPORTER_A);
+  assert.equal(summaryA.total, 1);
+  assert.equal(summaryA.byStatus.submitted, 1);
+
+  // Evidence upload/download dan conversation.createOrOpen tetap mengenali kepemilikan reporterId
+  const pdfBytes = makePdf([['Bukti terenkripsi laporan']]);
+  const evidence = await registerEvidenceUpload(
+    CALLER_REPORTER_A,
+    created.id,
+    {
+      fileName: 'bukti.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: pdfBytes.byteLength,
+      contentBase64: Buffer.from(pdfBytes).toString('base64'),
+    },
+    'req_enc_ev_1',
+  );
+  assert.equal(evidence.status, 'committed');
+  const dl = await authorizeEvidenceDownload(
+    CALLER_REPORTER_A,
+    created.id,
+    evidence.evidenceId,
+    'req_enc_ev_dl',
+  );
+  assert.ok(dl.url);
+  const conv = await createOrOpenConversation(CALLER_REPORTER_A, {
+    reportId: created.id,
+  });
+  assert.equal(conv.conversation.reportId, created.id);
+
+  // Pembaruan status tetap menulis ulang hanya encryptedData (tanpa membocorkan status/updatedAt plaintext)
   const updated = await updateReportStatus(
     CALLER_ADMIN_1,
     created.id,
@@ -218,6 +283,15 @@ test('ENC-02: Laporan baru menyimpan encryptedData (description & location) di F
     updated.description,
     'Narasi kronologi sensitif pelapor yang harus terenkripsi.',
   );
+
+  const storedAfterUpdate = getMockDoc(`reports/${created.id}`);
+  assert.deepEqual(Object.keys(storedAfterUpdate), ['encryptedData']);
+
+  const summaryAfter = await getReportsSummary(CALLER_ADMIN_1);
+  assert.equal(summaryAfter.total, 2);
+  assert.equal(summaryAfter.byStatus.under_review, 1);
+  assert.equal(summaryAfter.byStatus.submitted, 1);
+  assert.ok(createdB.id);
 });
 
 test('ENC-03: Pesan chat baru dan conversations.lastMessage tersimpan terenkripsi {ciphertext, iv, tag} di Firestore dan terdekripsi lewat API', async () => {
@@ -302,6 +376,30 @@ test('ENC-04: Data lama/seed plaintext tetap terbaca (backward-compatible), seda
   const legacyReport = await getReportDetail(CALLER_REPORTER_A, 'seed_rpt_a1');
   assert.match(legacyReport.description, /DATA UJI SINTETIS/);
   assert.equal(legacyReport.location, 'Grup komunitas daring (contoh)');
+
+  // Laporan format transisi (2 field di encryptedData, 7 field di top-level) tetap terbaca normal
+  seedMockDocs([
+    {
+      path: 'reports/partial_enc_rpt',
+      data: {
+        reporterId: CALLER_REPORTER_A.uid,
+        category: 'Lainnya',
+        incidentAt: null,
+        status: 'submitted',
+        createdAt: new Date('2026-11-01T10:00:00+07:00'),
+        updatedAt: new Date('2026-11-01T10:00:00+07:00'),
+        resolvedAt: null,
+        encryptedData: encryptJson({
+          description: 'Kronologi format parsial 2 field.',
+          location: null,
+        }),
+      },
+    },
+  ]);
+  const partialReport = await getReportDetail(CALLER_REPORTER_A, 'partial_enc_rpt');
+  assert.equal(partialReport.description, 'Kronologi format parsial 2 field.');
+  assert.equal(partialReport.location, null);
+  assert.equal(partialReport.category, 'Lainnya');
 
   // Pesan seed plaintext tetap terbaca normal, dan bisa bercampur dengan pesan terenkripsi baru
   await sendMessage(CALLER_REPORTER_A, 'seed_conv_a3', {
