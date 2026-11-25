@@ -6,6 +6,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 
 import { buildDataset, UID } from '../../../seed-data.mjs';
 import {
@@ -24,8 +26,11 @@ import {
 import { ApiError } from '@/server/errors/api-error';
 import {
   createOrOpenConversation,
+  getConversationById,
+  listConversations,
   listMessages,
   sendMessage,
+  updateConversationByAdmin,
 } from '@/server/services/conversation.service';
 import {
   createReport,
@@ -215,7 +220,7 @@ test('ENC-02: Laporan baru menyimpan encryptedData (description & location) di F
   );
 });
 
-test('ENC-03: Pesan chat baru menyimpan body terenkripsi {ciphertext, iv, tag} di Firestore dan terdekripsi lewat API', async () => {
+test('ENC-03: Pesan chat baru dan conversations.lastMessage tersimpan terenkripsi {ciphertext, iv, tag} di Firestore dan terdekripsi lewat API', async () => {
   resetMockFirebaseAdmin();
   const ds = buildDataset();
   seedMockDocs(ds.docs, ds.files);
@@ -224,12 +229,13 @@ test('ENC-03: Pesan chat baru menyimpan body terenkripsi {ciphertext, iv, tag} d
     reportId: 'seed_rpt_a1',
   });
 
+  const longMessage = `${'Pesan rahasia pelapor kepada petugas SISKA. '.repeat(6)}END`;
   const sent = await sendMessage(CALLER_REPORTER_A, conversation.id, {
-    body: 'Pesan rahasia pelapor kepada petugas SISKA.',
+    body: longMessage,
   });
 
   // Respons API mengembalikan plaintext terdekripsi
-  assert.equal(sent.body, 'Pesan rahasia pelapor kepada petugas SISKA.');
+  assert.equal(sent.body, longMessage);
 
   // Dokumen mentah di Firestore menyimpan body terenkripsi sesuai struktur PM
   const storedMsg = getMockDoc(
@@ -250,15 +256,41 @@ test('ENC-03: Pesan chat baru menyimpan body terenkripsi {ciphertext, iv, tag} d
     'tag',
   ]);
 
+  // Dokumen induk conversations/{id}.lastMessage juga harus tersimpan terenkripsi (bukan plaintext)
+  const storedConv = getMockDoc(`conversations/${conversation.id}`);
+  assert.ok(storedConv);
+  assert.equal(typeof storedConv.lastMessage, 'object');
+  assert.equal(isEncryptedPayload(storedConv.lastMessage), true);
+  assert.deepEqual(Object.keys(storedConv.lastMessage).sort(), [
+    'ciphertext',
+    'iv',
+    'tag',
+  ]);
+
+  // Endpoint API percakapan (list, detail, admin update) mengembalikan lastMessage terdekripsi (maks 180 karakter)
+  const expectedPreview = longMessage.slice(0, 180);
+  const convList = await listConversations(CALLER_REPORTER_A);
+  const convItem = convList.items.find((item) => item.id === conversation.id);
+  assert.ok(convItem);
+  assert.equal(convItem.lastMessage, expectedPreview);
+
+  const convDetail = await getConversationById(CALLER_REPORTER_A, conversation.id);
+  assert.equal(convDetail.lastMessage, expectedPreview);
+
+  const convUpdated = await updateConversationByAdmin(
+    CALLER_ADMIN_1,
+    conversation.id,
+    { assignedAdminId: CALLER_ADMIN_1.uid },
+    'req_enc_conv_assign',
+  );
+  assert.equal(convUpdated.lastMessage, expectedPreview);
+
   const listed = await listMessages(CALLER_REPORTER_A, conversation.id, {
     cursor: null,
     limit: 50,
   });
   assert.equal(listed.items.length, 1);
-  assert.equal(
-    listed.items[0].body,
-    'Pesan rahasia pelapor kepada petugas SISKA.',
-  );
+  assert.equal(listed.items[0].body, longMessage);
 });
 
 test('ENC-04: Data lama/seed plaintext tetap terbaca (backward-compatible), sedangkan payload terenkripsi rusak gagal secara aman', async () => {
@@ -334,4 +366,29 @@ test('ENC-04: Data lama/seed plaintext tetap terbaca (backward-compatible), seda
       }),
     (err) => err instanceof ApiError && err.status === 500,
   );
+
+  // Percakapan dengan lastMessage terenkripsi korup harus gagal fail-closed saat dibaca
+  const corruptConv = getMockDoc('conversations/seed_conv_a3');
+  corruptConv.lastMessage = {
+    ciphertext: 'abcd',
+    iv: '0'.repeat(24),
+    tag: 'f'.repeat(32),
+  };
+  seedMockDocs([{ path: 'conversations/seed_conv_a3', data: corruptConv }]);
+
+  await assert.rejects(
+    () => getConversationById(CALLER_REPORTER_A, 'seed_conv_a3'),
+    (err) => err instanceof ApiError && err.status === 500,
+  );
+});
+
+test('ENC-05: ConversationChat di live-pages mengambil percakapan dan pesan dari API backend (bukan data.body/data.lastMessage mentah Firestore)', () => {
+  const livePagesSource = readFileSync(
+    resolvePath(process.cwd(), 'src/components/live-pages.tsx'),
+    'utf8',
+  );
+  assert.match(livePagesSource, /fetchConversations\(/);
+  assert.match(livePagesSource, /fetchConversationMessages\(/);
+  assert.doesNotMatch(livePagesSource, /data\.body\?\?/);
+  assert.doesNotMatch(livePagesSource, /data\.lastMessage\s*===\s*"string"/);
 });

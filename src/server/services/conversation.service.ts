@@ -63,6 +63,23 @@ export type {
   SerializedMessage,
 };
 
+function resolveEncryptedText(value: unknown, fieldLabel: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (isEncryptedPayload(value)) {
+    return decryptText(value);
+  }
+  if (typeof value === 'string') {
+    // Fallback kompatibel untuk data lama/seed yang masih tersimpan plaintext
+    return value;
+  }
+  throw ApiError.internal(
+    `Format field '${fieldLabel}' pada percakapan tidak valid.`,
+    'Data percakapan tidak dapat didekripsi.',
+  );
+}
+
 // Serialisasi Dokumen Percakapan
 function serializeConversationDoc(
   id: string,
@@ -81,7 +98,7 @@ function serializeConversationDoc(
     status: (data.status as ConversationStatus) ?? 'open',
     createdAt: toIsoDateString(data.createdAt),
     updatedAt: toIsoDateString(data.updatedAt),
-    lastMessage: typeof data.lastMessage === 'string' ? data.lastMessage : null,
+    lastMessage: resolveEncryptedText(data.lastMessage, 'lastMessage'),
     lastMessageSenderUid:
       typeof data.lastMessageSenderUid === 'string' ? data.lastMessageSenderUid : null,
     lastMessageAt: data.lastMessageAt ? toIsoDateString(data.lastMessageAt) : null,
@@ -89,29 +106,12 @@ function serializeConversationDoc(
   };
 }
 
-function resolveMessageBodyText(rawBody: unknown): string {
-  if (isEncryptedPayload(rawBody)) {
-    return decryptText(rawBody);
-  }
-  if (typeof rawBody === 'string') {
-    // Fallback kompatibel untuk pesan lama/seed yang masih tersimpan plaintext
-    return rawBody;
-  }
-  if (rawBody !== undefined && rawBody !== null) {
-    throw ApiError.internal(
-      'Format field body pada pesan percakapan tidak valid.',
-      'Pesan percakapan tidak dapat didekripsi.',
-    );
-  }
-  return '';
-}
-
 // Serialisasi Dokumen Pesan
 function serializeMessageDoc(id: string, data: DocumentData): SerializedMessage {
   return {
     id,
     senderUid: String(data.senderUid ?? ''),
-    body: resolveMessageBodyText(data.body),
+    body: resolveEncryptedText(data.body, 'body') ?? '',
     createdAt: toIsoDateString(data.createdAt),
     attachmentPath:
       typeof data.attachmentPath === 'string' ? data.attachmentPath : null,
@@ -436,9 +436,11 @@ export async function sendMessage(
 
       const now = new Date();
       const msgRef = preGeneratedMsgRef;
+      const encryptedBody = encryptText(input.body);
+      const encryptedLastMessage = encryptText(input.body.slice(0, 180));
       const msgData: MessageDocument = {
         senderUid: authorized.uid,
-        body: encryptText(input.body),
+        body: encryptedBody,
         createdAt: now,
         attachmentPath: uploadedAttachmentPath,
       };
@@ -446,7 +448,7 @@ export async function sendMessage(
       tx.create(msgRef, msgData);
       tx.update(convRef, {
         updatedAt: now,
-        lastMessage: input.body.slice(0, 180),
+        lastMessage: encryptedLastMessage,
         lastMessageSenderUid: authorized.uid,
         lastMessageAt: now,
         ...(authorized.role === 'admin' && !assignedAdminId

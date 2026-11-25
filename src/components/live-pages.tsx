@@ -11,7 +11,7 @@ import { AppShell } from "@/components/shell";
 import { AiChatPanel } from "@/components/ai-chat";
 import {
   SiskaApiClientError, fetchReportsPage, fetchReportsSummary, fetchReportDetail,
-  submitNewReport, uploadEvidenceMultipart, openConversation,
+  submitNewReport, uploadEvidenceMultipart, openConversation, fetchConversationMessages,
   postConversationMessage, fetchMessageAttachmentSignedUrl, fetchEvidenceSignedDownloadUrl, transitionReportStatusByAdmin,
   updateConversationStatusByAdmin, fetchMyProfile, updateMyProfileName, updateMyProfileWithAvatar,
   fetchAiRagDocumentsByAdmin, addAiRagDocumentByAdmin, uploadAiRagPdfByAdmin, deleteAiRagDocumentByAdmin, resetAiRagDocumentsByAdmin,
@@ -295,15 +295,6 @@ function Detail({id,admin}:{id:string;admin:boolean}) {
 export function LiveUserReportDetail({id}:{id:string}){return <Detail id={id} admin={false}/>;}
 export function LiveAdminReportDetail({id}:{id:string}){return <Detail id={id} admin={true}/>;}
 
-function firestoreDate(value: unknown): string {
- if (value && typeof value === "object" && "toDate" in value && typeof (value as {toDate?:unknown}).toDate === "function") {
-  return (value as {toDate:()=>Date}).toDate().toISOString();
- }
- if (value instanceof Date) return value.toISOString();
- if (typeof value === "string") return value;
- return new Date(0).toISOString();
-}
-
 function ConversationChat({admin}:{admin:boolean}) {
  const router = useRouter();
  const searchParams = useSearchParams();
@@ -321,19 +312,57 @@ function ConversationChat({admin}:{admin:boolean}) {
  const [loading,setLoading]=useState(true);
  const [busy,setBusy]=useState(false);
  const [statusBusy,setStatusBusy]=useState(false);
+ const activeRef=useRef("");
+ activeRef.current=active;
+ const convFetchSeqRef=useRef(0);
+ const msgFetchSeqRef=useRef(0);
+ // Jumlah pesan belum dibaca per percakapan (id -> jumlah pesan dari lawan bicara).
+ const [unreadByConversation,setUnreadByConversation]=useState<Record<string,number>>({});
+ const unreadSummary=useUnreadSummary();
 
- // Auth dan daftar percakapan: listener dipasang setelah Firebase Auth memulihkan sesi.
+ const loadConversationsFromApi=useCallback(async(clearExistingError=false)=>{
+  const seq=++convFetchSeqRef.current;
+  const result=await fetchConversations();
+  if(seq!==convFetchSeqRef.current)return;
+  const items=result.items;
+  setConversations(items);
+  const nextUnread:Record<string,number>={};
+  for(const item of items){
+   if(item.id!==activeRef.current&&(item.unreadCount??0)>0)nextUnread[item.id]=item.unreadCount;
+  }
+  setUnreadByConversation(nextUnread);
+  setActive(current=>current&&items.some(item=>item.id===current)?current:(items[0]?.id??""));
+  if(clearExistingError)setError("");
+  setLoading(false);
+ },[]);
+
+ // Auth dan daftar percakapan: ambil data terdekripsi dari API backend terlebih dahulu,
+ // lalu gunakan listener Firestore hanya sebagai pemicu pembaruan realtime.
  useEffect(()=>{
   let cancelled=false;
   const unsubscribers:Unsubscribe[]=[];
-  let assignedItems:SerializedConversation[]=[];
-  let unassignedItems:SerializedConversation[]=[];
-  const mergeAdminItems=()=>{
-   const merged=new Map<string,SerializedConversation>();
-   for(const item of [...assignedItems,...unassignedItems]) merged.set(item.id,item);
-   const items=Array.from(merged.values()).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
-   setConversations(items);
-   setActive(current=>current&&items.some(item=>item.id===current)?current:(items[0]?.id??""));
+  let refreshTimer:ReturnType<typeof setTimeout>|undefined;
+  const scheduleRefresh=()=>{
+   if(cancelled)return;
+   if(refreshTimer)clearTimeout(refreshTimer);
+   refreshTimer=setTimeout(()=>{
+    void loadConversationsFromApi().catch(cause=>{
+     if(!cancelled&&auth?.currentUser)setError(errorText(cause));
+    });
+   },120);
+  };
+
+  const attachSignal=(targetQuery:ReturnType<typeof query>,label:string)=>{
+   let initial=true;
+   unsubscribers.push(onSnapshot(targetQuery,()=>{
+    if(initial){initial=false;return;}
+    scheduleRefresh();
+   },listenerError=>{
+    if(cancelled||!auth?.currentUser)return;
+    console.error(`[SISKA CHAT] ${label}:`,listenerError);
+    setError(`Gagal memantau percakapan: ${listenerError.message}`);
+    setLoading(false);
+   }));
   };
 
   async function subscribe(){
@@ -348,49 +377,24 @@ function ConversationChat({admin}:{admin:boolean}) {
      throw new Error("Akun ini belum memiliki Firebase Custom Claims role='admin'. Pastikan backend memasang claim admin, lalu login ulang.");
     }
     setCurrentUid(user.uid);
-    const toConversation=(id:string,data:Record<string,unknown>):SerializedConversation=>({
-     id,
-     type:"report_admin",
-     reporterId:String(data.reporterId??data.reporterUid??""),
-     reporterUid:String(data.reporterId??data.reporterUid??""),
-     assignedAdminId:typeof data.assignedAdminId==="string"?data.assignedAdminId:typeof data.adminUid==="string"?data.adminUid:null,
-     adminUid:typeof data.assignedAdminId==="string"?data.assignedAdminId:typeof data.adminUid==="string"?data.adminUid:null,
-     reportId:typeof data.reportId==="string"?data.reportId:null,
-     status:data.status==="closed"?"closed":"open",
-     createdAt:firestoreDate(data.createdAt),
-     updatedAt:firestoreDate(data.updatedAt),
-     lastMessage:typeof data.lastMessage==="string"?data.lastMessage:null,
-     lastMessageAt:data.lastMessageAt?firestoreDate(data.lastMessageAt):null,
-     lastMessageSenderUid:typeof data.lastMessageSenderUid==="string"?data.lastMessageSenderUid:null,
-     unreadCount:0,
-    });
+    // Ambil daftar percakapan yang sudah didekripsi dari backend sebelum menampilkan ke user.
+    await loadConversationsFromApi(true);
+    if(cancelled)return;
 
     if(admin){
-     const assignedQuery=query(collection(db,"conversations"),where("assignedAdminId","==",user.uid),orderBy("updatedAt","desc"));
-     const unassignedQuery=query(collection(db,"conversations"),where("assignedAdminId","==",null),orderBy("updatedAt","desc"));
-     unsubscribers.push(onSnapshot(assignedQuery,snapshot=>{
-      assignedItems=snapshot.docs.map(item=>toConversation(item.id,item.data() as Record<string,unknown>));
-      mergeAdminItems();setLoading(false);
-     },listenerError=>{if(cancelled||!auth?.currentUser)return;console.error("[SISKA CHAT] Admin assigned listener:",listenerError);setError(`Gagal memuat percakapan yang ditugaskan: ${listenerError.message}`);setLoading(false);}));
-     unsubscribers.push(onSnapshot(unassignedQuery,snapshot=>{
-      unassignedItems=snapshot.docs.map(item=>toConversation(item.id,item.data() as Record<string,unknown>));
-      mergeAdminItems();setLoading(false);
-     },listenerError=>{if(cancelled||!auth?.currentUser)return;console.error("[SISKA CHAT] Admin unassigned listener:",listenerError);setError(`Gagal memuat percakapan yang belum ditugaskan: ${listenerError.message}`);setLoading(false);}));
+     attachSignal(query(collection(db,"conversations"),where("assignedAdminId","==",user.uid),orderBy("updatedAt","desc")),"Admin assigned listener");
+     attachSignal(query(collection(db,"conversations"),where("assignedAdminId","==",null),orderBy("updatedAt","desc")),"Admin unassigned listener");
     }else{
-     const reporterQuery=query(collection(db,"conversations"),where("reporterId","==",user.uid),orderBy("updatedAt","desc"));
-     unsubscribers.push(onSnapshot(reporterQuery,snapshot=>{
-      const items=snapshot.docs.map(item=>toConversation(item.id,item.data() as Record<string,unknown>));
-      setConversations(items);setLoading(false);
-      setActive(current=>current&&items.some(item=>item.id===current)?current:(items[0]?.id??""));
-     },listenerError=>{if(cancelled||!auth?.currentUser)return;console.error("[SISKA CHAT] Reporter listener:",listenerError);setError(`Gagal memuat percakapan: ${listenerError.message}`);setLoading(false);}));
+     attachSignal(query(collection(db,"conversations"),where("reporterId","==",user.uid),orderBy("updatedAt","desc")),"Reporter listener");
     }
    }catch(cause){
-    if(!cancelled){const message=cause instanceof Error?cause.message:"Gagal menginisialisasi listener chat.";console.error("[SISKA CHAT] Initialization:",cause);setError(message);setLoading(false);}
+    if(!cancelled){const message=cause instanceof Error?cause.message:"Gagal menginisialisasi chat.";console.error("[SISKA CHAT] Initialization:",cause);setError(message);setLoading(false);}
    }
   }
   const stop=()=>{
    if(cancelled)return;
    cancelled=true;
+   if(refreshTimer)clearTimeout(refreshTimer);
    unsubscribers.splice(0).forEach(unsubscribe=>unsubscribe());
   };
   window.addEventListener("siska:before-logout",stop);
@@ -399,7 +403,7 @@ function ConversationChat({admin}:{admin:boolean}) {
    window.removeEventListener("siska:before-logout",stop);
    stop();
   };
- },[admin]);
+ },[admin,loadConversationsFromApi]);
 
  // Nama reporter dipantau terpisah agar perubahan nama profil ikut muncul tanpa refresh.
  const reporterIdsKey=useMemo(()=>JSON.stringify(Array.from(new Set(conversations.map(item=>item.reporterId).filter(Boolean))).sort()),[conversations]);
@@ -428,23 +432,66 @@ function ConversationChat({admin}:{admin:boolean}) {
   };
  },[admin,reporterIdsKey]);
 
- // Pesan percakapan aktif: Firestore snapshot menjadi satu-satunya sumber state pesan.
+ // Pesan percakapan aktif: ambil isi terdekripsi dari API backend terlebih dahulu,
+ // lalu gunakan snapshot Firestore hanya sebagai pemicu pembaruan realtime.
  useEffect(()=>{
   if(!db||!active){setMessages([]);setMessagesConv("");return;}
+  let cancelled=false;
+  let loadedIdsSig:string|null=null;
+  let latestSnapshotSig:string|null=null;
   setMessages([]);setMessagesConv("");
+
+  const fetchAllFromApi=async(conversationId:string,seq:number)=>{
+   const all:SerializedMessage[]=[];
+   let cursor:string|null=null;
+   for(let page=0;page<50;page+=1){
+    const result=await fetchConversationMessages(conversationId,{limit:100,cursor});
+    if(cancelled||seq!==msgFetchSeqRef.current)return null;
+    all.push(...result.items);
+    if(!result.nextCursor)break;
+    cursor=result.nextCursor;
+   }
+   return all;
+  };
+
+  const loadMessagesFromApi=async()=>{
+   const seq=++msgFetchSeqRef.current;
+   try{
+    const items=await fetchAllFromApi(active,seq);
+    if(!items||cancelled||seq!==msgFetchSeqRef.current)return;
+    loadedIdsSig=items.map(item=>item.id).join(",");
+    setMessages(items);
+    setMessagesConv(active);
+    // Jika ada pesan masuk saat request pertama berjalan, segera tarik pembaruannya.
+    if(latestSnapshotSig!==null&&latestSnapshotSig!==loadedIdsSig){
+     void loadMessagesFromApi();
+    }
+   }catch(cause){
+    if(!cancelled&&auth?.currentUser){
+     console.error(`[SISKA CHAT] API messages load (${active}):`,cause);
+     setError(errorText(cause));
+    }
+   }
+  };
+
+  void loadMessagesFromApi();
+
   const messagesQuery=query(collection(db,"conversations",active,"messages"),orderBy("createdAt","asc"));
   const unsubscribe=onSnapshot(messagesQuery,snapshot=>{
-   const items=snapshot.docs.map(item=>{
-    const data=item.data();
-    return {id:item.id,senderUid:String(data.senderUid??""),body:String(data.body??""),createdAt:firestoreDate(data.createdAt),attachmentPath:typeof data.attachmentPath==="string"?data.attachmentPath:null,readByRecipient:data.readByRecipient===true};
-   });
-   setMessages(items);setMessagesConv(active);
+   const sig=snapshot.docs.map(item=>item.id).join(",");
+   latestSnapshotSig=sig;
+   if(loadedIdsSig!==null&&sig!==loadedIdsSig){
+    void loadMessagesFromApi();
+   }
   },listenerError=>{
    if(!auth?.currentUser)return;
    console.error(`[SISKA CHAT] Messages listener (${active}):`,listenerError);
-   setError(`Gagal menerima pesan realtime: ${listenerError.message}`);
+   setError(`Gagal memantau pembaruan pesan realtime: ${listenerError.message}`);
   });
-  const stop=()=>unsubscribe();
+  const stop=()=>{
+   cancelled=true;
+   unsubscribe();
+  };
   window.addEventListener("siska:before-logout",stop);
   return ()=>{
    window.removeEventListener("siska:before-logout",stop);
@@ -460,9 +507,6 @@ function ConversationChat({admin}:{admin:boolean}) {
  // lalu dibekukan selama percakapan terbuka agar pembatas tidak bergeser saat pesan baru masuk.
  const pendingBoundaryRef=useRef("");
  const [readBoundary,setReadBoundary]=useState<{conversationId:string;prevMs:number;openMs:number}|null>(null);
- // Jumlah pesan belum dibaca per percakapan (id -> jumlah pesan dari lawan bicara).
- const [unreadByConversation,setUnreadByConversation]=useState<Record<string,number>>({});
- const unreadSummary=useUnreadSummary();
 
  const markActiveAsRead=useCallback((force=false)=>{
   if(!active||typeof document==="undefined"||document.visibilityState!=="visible")return;
@@ -506,25 +550,23 @@ function ConversationChat({admin}:{admin:boolean}) {
  },[markActiveAsRead]);
 
  // Jumlah pesan belum dibaca per percakapan, supaya admin tahu tiap pengguna mengirim berapa pesan.
- // Sumber kebenarannya server (receipt baca per UID). Disegarkan saat ada pesan baru di daftar
- // percakapan (listener Firestore), saat badge global berubah, dan saat berpindah percakapan.
- const conversationsSignature=useMemo(()=>conversations.map(item=>`${item.id}:${item.lastMessageAt??item.updatedAt}`).join("|"),[conversations]);
+ // Sumber kebenarannya server (receipt baca per UID). Disegarkan saat badge global berubah.
+ const prevChatBadgeRef=useRef<number|null>(null);
  useEffect(()=>{
   if(!currentUid)return;
+  if(prevChatBadgeRef.current===null){
+   prevChatBadgeRef.current=unreadSummary.chats;
+   return;
+  }
+  if(prevChatBadgeRef.current===unreadSummary.chats)return;
+  prevChatBadgeRef.current=unreadSummary.chats;
   let cancelled=false;
   const timer=setTimeout(()=>{
-   fetchConversations().then(result=>{
-    if(cancelled)return;
-    const next:Record<string,number>={};
-    for(const item of result.items){
-     // Percakapan yang sedang dibuka sedang/sudah ditandai dibaca; jangan tampilkan angka untuknya.
-     if(item.id!==active&&(item.unreadCount??0)>0)next[item.id]=item.unreadCount;
-    }
-    setUnreadByConversation(next);
-   }).catch(()=>undefined);
-  },250); // gabungkan pesan beruntun menjadi satu request
+   if(cancelled)return;
+   void loadConversationsFromApi().catch(()=>undefined);
+  },250); // gabungkan pembaruan beruntun menjadi satu request
   return()=>{cancelled=true;clearTimeout(timer);};
- },[conversationsSignature,unreadSummary.chats,active,currentUid]);
+ },[unreadSummary.chats,currentUid,loadConversationsFromApi]);
 
 
  // ===== Pembatas "N pesan belum terbaca" =====
@@ -610,10 +652,12 @@ function ConversationChat({admin}:{admin:boolean}) {
   if(!active||!body||!current||current.status!=="open")return;
   setBusy(true);setError("");
   try{
-   await postConversationMessage(active,body,chatFile);
-   // Jangan append hasil API ke state lokal: onSnapshot akan menerima dokumen yang sudah committed.
+   const sent=await postConversationMessage(active,body,chatFile);
    setText("");
    setChatFile(null);
+   setMessages(old=>old.some(item=>item.id===sent.id)?old:[...old,sent]);
+   setMessagesConv(active);
+   void loadConversationsFromApi().catch(()=>undefined);
   }catch(cause){setError(errorText(cause));}
   finally{setBusy(false);}
  }
@@ -630,7 +674,10 @@ function ConversationChat({admin}:{admin:boolean}) {
  async function toggleStatus(){
   if(!current)return;
   setStatusBusy(true);setError("");
-  try{await updateConversationStatusByAdmin(active,{status:current.status==="open"?"closed":"open"});}
+  try{
+   const updated=await updateConversationStatusByAdmin(active,{status:current.status==="open"?"closed":"open"});
+   setConversations(old=>old.map(item=>item.id===updated.id?updated:item));
+  }
   catch(cause){setError(errorText(cause));}
   finally{setStatusBusy(false);}
  }

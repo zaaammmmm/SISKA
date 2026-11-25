@@ -100,7 +100,7 @@ export interface ConversationDocument {
   status: ConversationStatus;
   createdAt: Date | string;
   updatedAt: Date | string;
-  lastMessage?: string;
+  lastMessage?: string | EncryptedPayload | null;
   lastMessageSenderUid?: string;
   lastMessageAt?: Date | string;
 }
