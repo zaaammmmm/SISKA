@@ -21,6 +21,13 @@ const nextConfig: NextConfig = {
     unoptimized: true,
   },
   serverExternalPackages: ['pdfjs-dist'],
+  // PDF.js memuat worker melalui dynamic import saat berjalan di Node.js.
+  // File ini harus ikut dalam output tracing agar tersedia pada Vercel Function.
+  outputFileTracingIncludes: {
+    '/api/v1/admin/ai-documents': [
+      './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
+    ],
+  },
   async headers() {
     return [
       {

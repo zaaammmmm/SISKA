@@ -1,0 +1,30 @@
+--- a/next.config.ts
++++ b/next.config.ts
+@@ -21,6 +21,13 @@
+     unoptimized: true,
+   },
+   serverExternalPackages: ['pdfjs-dist'],
++  // PDF.js memuat worker melalui dynamic import saat berjalan di Node.js.
++  // File ini harus ikut dalam output tracing agar tersedia pada Vercel Function.
++  outputFileTracingIncludes: {
++    '/api/v1/admin/ai-documents': [
++      './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
++    ],
++  },
+   async headers() {
+     return [
+       {
+--- a/src/server/services/ai-pdf-extractor.ts
++++ b/src/server/services/ai-pdf-extractor.ts
+@@ -120,9 +120,9 @@
+     );
+ 
+     throw ApiError.uploadRejected(
+-      'PDF gagal diproses oleh layanan ekstraksi. Pastikan server SISKA menggunakan Node.js 22 atau lebih baru dan berkas PDF dapat dibuka.',
++      'PDF gagal diproses oleh layanan ekstraksi. Silakan coba unggah kembali. Jika masalah berlanjut, hubungi administrator.',
+       400,
+-      { file: 'Periksa versi Node.js server dan validitas PDF, lalu coba unggah kembali.' },
++      { file: 'Coba unggah kembali. Jika masalah berlanjut, hubungi administrator.' },
+     );
+   } finally {
+     if (task) {

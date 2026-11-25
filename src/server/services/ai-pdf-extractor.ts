@@ -120,9 +120,9 @@ export async function extractAiPdfText(
     );
 
     throw ApiError.uploadRejected(
-      'PDF gagal diproses oleh layanan ekstraksi. Pastikan server SISKA menggunakan Node.js 22 atau lebih baru dan berkas PDF dapat dibuka.',
+      'PDF gagal diproses oleh layanan ekstraksi. Silakan coba unggah kembali. Jika masalah berlanjut, hubungi administrator.',
       400,
-      { file: 'Periksa versi Node.js server dan validitas PDF, lalu coba unggah kembali.' },
+      { file: 'Coba unggah kembali. Jika masalah berlanjut, hubungi administrator.' },
     );
   } finally {
     if (task) {
