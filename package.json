@@ -4,7 +4,7 @@
   "private": true,
   "description": "SISKA (Sistem Pengaduan Kekerasan Seksual) — Next.js App Router + Firebase Backend & Emulator Seeder",
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "scripts": {
     "dev": "next dev",

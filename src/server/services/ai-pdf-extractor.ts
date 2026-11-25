@@ -53,13 +53,16 @@ export async function extractAiPdfText(
   bytes: Uint8Array,
   title: string,
 ): Promise<string> {
-  const task = getDocument({
-    data: new Uint8Array(bytes),
-    useSystemFonts: true,
-    isEvalSupported: false,
-  });
+  // pdfjs-dist 4.10.x membutuhkan Node.js >=20; proyek SISKA menetapkan Node.js >=22.
+  // Buat task di dalam try agar error sinkron dari PDF.js juga tertangani.
+  let task: ReturnType<typeof getDocument> | null = null;
 
   try {
+    task = getDocument({
+      data: new Uint8Array(bytes),
+      useSystemFonts: true,
+      isEvalSupported: false,
+    });
     const pdf = await task.promise;
     const pages: string[] = [];
     let totalChars = title.length;
@@ -101,12 +104,42 @@ export async function extractAiPdfText(
     return content;
   } catch (error) {
     if (error instanceof ApiError) throw error;
+
+    // Jangan tampilkan detail parser kepada pengguna, tetapi simpan penyebab aslinya
+    // agar error kompatibilitas Node/PDF.js, font, dan struktur PDF dapat dibedakan.
+    const cause = error instanceof Error ? error : new Error(String(error));
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        scope: 'ai_pdf_extractor',
+        errorName: cause.name,
+        errorMessage: cause.message.slice(0, 500),
+        nodeVersion: process.version,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+
     throw ApiError.uploadRejected(
-      'PDF tidak dapat dibaca. Pastikan berkas tidak rusak dan merupakan PDF yang valid.',
+      'PDF gagal diproses oleh layanan ekstraksi. Pastikan server SISKA menggunakan Node.js 22 atau lebih baru dan berkas PDF dapat dibuka.',
       400,
-      { file: 'Periksa berkas PDF lalu coba unggah kembali.' },
+      { file: 'Periksa versi Node.js server dan validitas PDF, lalu coba unggah kembali.' },
     );
   } finally {
-    await task.destroy();
+    if (task) {
+      try {
+        await task.destroy();
+      } catch (error) {
+        // Kegagalan cleanup tidak boleh menimpa error ekstraksi yang sebenarnya.
+        const cause = error instanceof Error ? error : new Error(String(error));
+        console.warn(
+          JSON.stringify({
+            level: 'warn',
+            scope: 'ai_pdf_extractor_cleanup',
+            errorName: cause.name,
+            errorMessage: cause.message.slice(0, 300),
+          }),
+        );
+      }
+    }
   }
 }
