@@ -24,6 +24,11 @@ import {
   resolveConversationReporterId,
 } from '@/server/authz/permissions';
 import type { AuthenticatedCaller } from '@/server/authz/verify-token';
+import {
+  decryptText,
+  encryptText,
+  isEncryptedPayload,
+} from '@/server/crypto/encryption';
 import { ApiError } from '@/server/errors/api-error';
 import {
   recordAuditEvent,
@@ -84,12 +89,29 @@ function serializeConversationDoc(
   };
 }
 
+function resolveMessageBodyText(rawBody: unknown): string {
+  if (isEncryptedPayload(rawBody)) {
+    return decryptText(rawBody);
+  }
+  if (typeof rawBody === 'string') {
+    // Fallback kompatibel untuk pesan lama/seed yang masih tersimpan plaintext
+    return rawBody;
+  }
+  if (rawBody !== undefined && rawBody !== null) {
+    throw ApiError.internal(
+      'Format field body pada pesan percakapan tidak valid.',
+      'Pesan percakapan tidak dapat didekripsi.',
+    );
+  }
+  return '';
+}
+
 // Serialisasi Dokumen Pesan
 function serializeMessageDoc(id: string, data: DocumentData): SerializedMessage {
   return {
     id,
     senderUid: String(data.senderUid ?? ''),
-    body: String(data.body ?? ''),
+    body: resolveMessageBodyText(data.body),
     createdAt: toIsoDateString(data.createdAt),
     attachmentPath:
       typeof data.attachmentPath === 'string' ? data.attachmentPath : null,
@@ -416,7 +438,7 @@ export async function sendMessage(
       const msgRef = preGeneratedMsgRef;
       const msgData: MessageDocument = {
         senderUid: authorized.uid,
-        body: input.body,
+        body: encryptText(input.body),
         createdAt: now,
         attachmentPath: uploadedAttachmentPath,
       };

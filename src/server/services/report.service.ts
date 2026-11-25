@@ -11,6 +11,11 @@ import {
   type AuthorizedCaller,
 } from '@/server/authz/permissions';
 import type { AuthenticatedCaller } from '@/server/authz/verify-token';
+import {
+  decryptJson,
+  encryptJson,
+  isEncryptedPayload,
+} from '@/server/crypto/encryption';
 import { ApiError } from '@/server/errors/api-error';
 import {
   recordAuditEventInBatch,
@@ -68,15 +73,50 @@ async function generateUniqueReportId(db: ReturnType<typeof getAdminDb>, date: D
   throw new Error('Tidak dapat membuat ID laporan unik hari ini.');
 }
 
+interface EncryptedReportFields {
+  description: string;
+  location: string | null;
+}
+
+function extractReportSensitiveFields(data: DocumentData): EncryptedReportFields {
+  if (isEncryptedPayload(data.encryptedData)) {
+    const decrypted = decryptJson<EncryptedReportFields>(data.encryptedData);
+    if (!decrypted || typeof decrypted !== 'object' || Array.isArray(decrypted)) {
+      throw ApiError.internal(
+        'Struktur payload laporan terenkripsi tidak valid.',
+        'Data laporan tidak dapat didekripsi.',
+      );
+    }
+    return {
+      description: typeof decrypted.description === 'string' ? decrypted.description : '',
+      location: typeof decrypted.location === 'string' ? decrypted.location : null,
+    };
+  }
+
+  if (data.encryptedData !== undefined && data.encryptedData !== null) {
+    throw ApiError.internal(
+      'Format field encryptedData pada laporan tidak valid.',
+      'Data laporan tidak dapat didekripsi.',
+    );
+  }
+
+  // Fallback kompatibel untuk data lama/seed yang masih tersimpan plaintext
+  return {
+    description: String(data.description ?? ''),
+    location: typeof data.location === 'string' ? data.location : null,
+  };
+}
+
 // Serialisasi Dokumen Laporan
 function serializeReportDoc(id: string, data: DocumentData): SerializedReport {
+  const { description, location } = extractReportSensitiveFields(data);
   return {
     id,
     reporterId: String(data.reporterId ?? ''),
     category: String(data.category ?? ''),
     incidentAt: toIsoStringOrNull(data.incidentAt),
-    location: typeof data.location === 'string' ? data.location : null,
-    description: String(data.description ?? ''),
+    location,
+    description,
     status: data.status as ReportStatus,
     createdAt: toIsoDateString(data.createdAt),
     updatedAt: toIsoDateString(data.updatedAt),
@@ -97,16 +137,20 @@ export async function createReport(
   const reportRef = db.collection('reports').doc(reportId);
   const historyRef = reportRef.collection('statusHistory').doc();
 
+  const encryptedData = encryptJson<EncryptedReportFields>({
+    description: input.description,
+    location: input.location ?? null,
+  });
+
   const reportData: ReportDocument = {
     reporterId: authorized.uid,
     category: input.category,
     incidentAt: input.incidentAt ?? null,
-    location: input.location ?? null,
-    description: input.description,
     status: 'submitted',
     createdAt: now,
     updatedAt: now,
     resolvedAt: null,
+    encryptedData,
   };
 
   const adminUsers = await db.collection('users').where('role', '==', 'admin').get();

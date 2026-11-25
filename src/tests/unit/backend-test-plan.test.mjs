@@ -77,6 +77,8 @@ process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
 process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
 process.env.FIREBASE_STORAGE_EMULATOR_HOST = '127.0.0.1:9199';
 process.env.FIREBASE_PROJECT_ID = 'demo-siska';
+process.env.DATA_ENCRYPTION_KEY =
+  '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 // ── Aktor Uji (Sesuai docs/09-TEST-PLAN.md §4 & seed-data.mjs) ─────────────
 

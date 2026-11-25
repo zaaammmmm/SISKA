@@ -1,6 +1,7 @@
 // Ekspor Utama Server
 
 export * from '@/server/authz';
+export * from '@/server/crypto/encryption';
 export * from '@/server/services';
 export * from '@/server/validators';
 export * from '@/server/audit';

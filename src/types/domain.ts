@@ -43,6 +43,12 @@ export type KBDocumentStatus = (typeof KB_DOCUMENT_STATUSES)[number];
 export const CONVERSATION_STATUSES = ['open', 'closed'] as const;
 export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];
 
+export interface EncryptedPayload {
+  ciphertext: string;
+  iv: string;
+  tag: string;
+}
+
 // Dokumen Firestore
 export interface UserDocument {
   uid: string;
@@ -59,8 +65,9 @@ export interface ReportDocument {
   reporterId: string;
   category: string;
   incidentAt: Date | string | null;
-  location: string | null;
-  description: string;
+  location?: string | null;
+  description?: string;
+  encryptedData?: EncryptedPayload;
   status: ReportStatus;
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -100,7 +107,7 @@ export interface ConversationDocument {
 
 export interface MessageDocument {
   senderUid: string;
-  body: string;
+  body: string | EncryptedPayload;
   createdAt: Date | string;
   attachmentPath?: string | null;
 }

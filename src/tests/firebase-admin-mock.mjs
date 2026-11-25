@@ -72,6 +72,16 @@ class MockDocSnapshot {
   data() {
     return this._data ? structuredClone(this._data) : undefined;
   }
+  get(fieldPath) {
+    if (!this._data || typeof fieldPath !== 'string') return undefined;
+    const parts = fieldPath.split('.');
+    let current = this._data;
+    for (const part of parts) {
+      if (current == null || typeof current !== 'object') return undefined;
+      current = current[part];
+    }
+    return current === undefined ? undefined : structuredClone(current);
+  }
 }
 
 class MockDocRef {

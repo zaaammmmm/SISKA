@@ -54,6 +54,8 @@ process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8085';
 process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
 process.env.FIREBASE_STORAGE_EMULATOR_HOST = '127.0.0.1:9199';
 process.env.FIREBASE_PROJECT_ID = 'demo-siska';
+process.env.DATA_ENCRYPTION_KEY =
+  '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 // Valid JPEG & PNG binary fixtures (lolos Magic Bytes assertValidFileSignature)
 const VALID_JPEG_BYTES = new Uint8Array([
