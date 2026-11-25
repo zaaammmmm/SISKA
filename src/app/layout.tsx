@@ -13,9 +13,10 @@ export const metadata: Metadata = {
   title: "SISKA — Sistem Informasi Pengaduan Kekerasan Seksual",
   description: "Sarana pengaduan yang terstruktur dan menjaga kerahasiaan informasi.",
   icons: {
-    icon: "/siska.png",
-    shortcut: "/siska.png",
-    apple: "/siska.png",
+    // Aplikasi berjalan pada basePath /siska; URL ikon harus menyertakan prefix tersebut.
+    icon: [{ url: "/siska/siska.png", type: "image/png" }],
+    shortcut: [{ url: "/siska/siska.png", type: "image/png" }],
+    apple: [{ url: "/siska/siska.png", type: "image/png" }],
   },
 };
 

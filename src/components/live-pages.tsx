@@ -10,7 +10,7 @@ import { withBasePath } from "@/lib/base-path";
 import { AppShell } from "@/components/shell";
 import { AiChatPanel } from "@/components/ai-chat";
 import {
-  SiskaApiClientError, fetchReportsPage, fetchReportsSummary, fetchReportDetail,
+  SiskaApiClientError, fetchReportsPage, fetchReportsSummary, fetchReportDetail, fetchNotifications,
   submitNewReport, uploadEvidenceMultipart, openConversation, fetchConversationMessages,
   postConversationMessage, fetchMessageAttachmentSignedUrl, fetchEvidenceSignedDownloadUrl, transitionReportStatusByAdmin,
   updateConversationStatusByAdmin, fetchMyProfile, updateMyProfileName, updateMyProfileWithAvatar,
@@ -19,6 +19,7 @@ import {
   broadcastNotificationByAdmin, markConversationAsRead, markNotificationsReadByTarget, fetchConversations,
 } from "@/lib/api-client";
 import { useUnreadSummary } from "@/lib/use-unread-summary";
+import { NOTIFICATIONS_CHANGED_EVENT } from "@/lib/notification-events";
 import type { SerializedReport, SerializedReportDetail, SerializedConversation, SerializedMessage, ReportsSummaryResult, SerializedAiRagDocument, SerializedKnowledgeDocument, SerializedAuditEvent, SignedDownloadUrlResult } from "@/types/api";
 import { ALLOWED_STATUS_TRANSITIONS, isStatusNoteRequired, type ReportStatus } from "@/types/domain";
 
@@ -33,7 +34,8 @@ const errorText = (e: unknown) => e instanceof SiskaApiClientError ? e.message :
 function Head({ title, subtitle, action }: { title: string; subtitle: string; action?: React.ReactNode }) { return <div className="page-head"><div><h1>{title}</h1><p>{subtitle}</p></div>{action}</div>; }
 function Alert({ children }: { children: React.ReactNode }) { return <p className="alert" role="alert">{children}</p>; }
 function StatusLabel({ status }: { status: ReportStatus }) { return <span className={`pill ${STATUS_CLASS[status]}`}>{STATUS[status]}</span>; }
-function ReportRows({ rows, admin = false, filtering = false }: { rows: SerializedReport[]; admin?: boolean; filtering?: boolean }) {
+function ReportRows({ rows, admin = false, filtering = false, unreadReportIds }: { rows: SerializedReport[]; admin?: boolean; filtering?: boolean; unreadReportIds?: ReadonlySet<string> }) {
+  const router = useRouter();
   if (!rows.length) {
     return (
       <div className="empty">
@@ -54,15 +56,34 @@ function ReportRows({ rows, admin = false, filtering = false }: { rows: Serializ
       <table>
         <thead><tr><th scope="col">Nomor</th><th scope="col">Kategori</th><th scope="col">Tanggal</th><th scope="col">Status</th><th scope="col">Aksi</th></tr></thead>
         <tbody>
-          {rows.map(r => (
-            <tr key={r.id}>
-              <td data-label="Nomor"><b>{r.id}</b></td>
-              <td data-label="Kategori">{r.category}</td>
-              <td data-label="Tanggal" className="num">{dateText(r.createdAt)}</td>
-              <td data-label="Status"><StatusLabel status={r.status}/></td>
-              <td data-label="Aksi"><Link className="link-teal" href={`${admin ? "/admin" : "/user"}/reports/${encodeURIComponent(r.id)}`}>Lihat detail<span className="sr-only"> laporan {r.id}</span></Link></td>
-            </tr>
-          ))}
+          {rows.map(r => {
+            const href = `${admin ? "/admin" : "/user"}/reports/${encodeURIComponent(r.id)}`;
+            const unread = admin && unreadReportIds?.has(r.id);
+            return (
+              <tr
+                key={r.id}
+                className={admin ? `report-row${unread ? " report-row-unread" : ""}` : undefined}
+                onClick={admin ? () => router.push(href) : undefined}
+                onKeyDown={admin ? event => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    router.push(href);
+                  }
+                } : undefined}
+                tabIndex={admin ? 0 : undefined}
+                role={admin ? "link" : undefined}
+                aria-label={admin ? `Buka detail laporan ${r.id}${unread ? ", belum dibuka" : ""}` : undefined}
+              >
+                <td data-label="Nomor">
+                  <span className="report-number-cell"><b>{r.id}</b>{unread && <span className="report-unread-label"><span aria-hidden="true"/>Belum dibuka</span>}</span>
+                </td>
+                <td data-label="Kategori">{r.category}</td>
+                <td data-label="Tanggal" className="num">{dateText(r.createdAt)}</td>
+                <td data-label="Status"><StatusLabel status={r.status}/></td>
+                <td data-label="Aksi"><Link className="link-teal" href={href} onClick={event => { if (admin) event.stopPropagation(); }}>Lihat detail<span className="sr-only"> laporan {r.id}</span></Link></td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -174,8 +195,36 @@ export function LiveHistoryPage({admin=false}:{admin?:boolean}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [rows,setRows]=useState<SerializedReport[]>([]); const [cursor,setCursor]=useState<string|null>(null); const [next,setNext]=useState<string|null>(null); const [status,setStatus]=useState(""); const [query,setQuery]=useState(""); const [error,setError]=useState(""); const [busy,setBusy]=useState(false);
+  const [unreadReportIds,setUnreadReportIds]=useState<Set<string>>(()=>new Set());
   const load=useCallback(async(reset=true)=>{setBusy(true);setError("");try{const result=await fetchReportsPage({limit:20,status:status ? status as ReportStatus : undefined,cursor:reset?undefined:cursor});setRows(old=>reset?result.items:[...old,...result.items]);setNext(result.nextCursor);setCursor(result.nextCursor);}catch(e){setError(errorText(e));}finally{setBusy(false);}},[status,cursor]);
   useEffect(()=>{void load(true);},[status]);
+  useEffect(()=>{
+    if(!admin)return;
+    let cancelled=false;
+    const refreshUnreadReports=async()=>{
+      try{
+        const unreadIds=new Set<string>();
+        let cursor:string|undefined;
+        do{
+          const page=await fetchNotifications({unreadOnly:true,limit:50,cursor});
+          for(const notification of page.items){
+            if(notification.type==="new_report_submitted" && notification.targetType==="report" && notification.targetId){
+              unreadIds.add(notification.targetId);
+            }
+          }
+          cursor=page.nextCursor??undefined;
+        }while(cursor);
+        if(!cancelled)setUnreadReportIds(unreadIds);
+      }catch{
+        // Penanda belum dibuka bersifat informatif; kegagalan notifikasi tidak menghalangi daftar laporan.
+      }
+    };
+    const handleRefresh=()=>void refreshUnreadReports();
+    void refreshUnreadReports();
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT,handleRefresh);
+    window.addEventListener("focus",handleRefresh);
+    return()=>{cancelled=true;window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT,handleRefresh);window.removeEventListener("focus",handleRefresh);};
+  },[admin]);
   const filtered=useMemo(()=>rows.filter(r=>(r.id+r.category+r.description).toLowerCase().includes(query.toLowerCase())),[rows,query]);
 
   useEffect(() => {
@@ -196,7 +245,7 @@ export function LiveHistoryPage({admin=false}:{admin?:boolean}) {
       </div>
       {error&&<Alert>{error}</Alert>}
       {busy&&<p className="loading" role="status">Memuat…</p>}
-      <ReportRows rows={filtered} admin={admin} filtering={!!(query||status)}/>
+      <ReportRows rows={filtered} admin={admin} filtering={!!(query||status)} unreadReportIds={unreadReportIds}/>
       {next&&<div className="more-row"><button className="btn btn-outline" disabled={busy} onClick={()=>void load(false)}>Muat laporan berikutnya</button></div>}
     </AppShell>
   );

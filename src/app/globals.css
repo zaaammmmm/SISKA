@@ -731,6 +731,13 @@ button.input-icon svg { width: 20px; height: 20px; }
 .table-wrap td { padding: 18px 20px; border-bottom: 1px solid var(--line); font-size: .9375rem; color: var(--ink); vertical-align: middle; }
 .table-wrap tbody tr:last-child td { border-bottom: 0; }
 .table-wrap tbody tr:hover td { background: #f8fbfb; }
+.table-wrap tbody tr.report-row { cursor: pointer; transition: background-color .16s ease, box-shadow .16s ease; }
+.table-wrap tbody tr.report-row:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
+.table-wrap tbody tr.report-row-unread td { background: #fff8e8; }
+.table-wrap tbody tr.report-row-unread:hover td { background: #fff1cf; }
+.report-number-cell { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+.report-unread-label { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #f0c36d; border-radius: 999px; padding: 4px 9px; background: #fff0c2; color: #80520b; font-size: .6875rem; font-weight: 700; white-space: nowrap; }
+.report-unread-label > span { width: 7px; height: 7px; border-radius: 50%; background: #d28a13; box-shadow: 0 0 0 3px rgba(210,138,19,.14); }
 .table-wrap td b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .table-wrap td b, .table-wrap td .link-teal { white-space: nowrap; }
 .table-wrap td.num { white-space: nowrap; color: var(--text); }
@@ -811,6 +818,8 @@ button.input-icon svg { width: 20px; height: 20px; }
 .bubble.me { background: var(--primary); color: #fff; border-bottom-right-radius: 6px; align-self: flex-end; }
 .bubble .who { display: flex; justify-content: space-between; gap: 24px; font-size: .75rem; font-weight: 600; color: var(--primary-700); margin-bottom: 4px; white-space: normal; }
 .bubble .who span { font-weight: 400; color: var(--muted); }
+.bubble.me .who { color: #fff; }
+.bubble.me .who span { color: #d8eeec; }
 .bubble-meta { display: inline-flex; align-items: center; gap: 8px; }
 .bubble .who .response-time { padding: 2px 7px; border-radius: 999px; background: var(--primary-50); color: var(--primary-700); font-size: .6875rem; font-weight: 600; }
 .bubble.me .who .bubble-meta span { color: #d8eeec; }
